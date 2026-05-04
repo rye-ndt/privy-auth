@@ -16,6 +16,7 @@ import { LoadingSpinner } from './components/atomics/spinner';
 import { FullScreenError } from './components/atomics/FullScreen';
 import { LoginView } from './components/views/login';
 import { createLogger } from './utils/logger';
+import { getOnboardingChainIds } from './utils/chainConfig';
 
 const log = createLogger('App');
 const TMA_AUTO_LOGIN_TIMEOUT_MS = 4000;
@@ -62,6 +63,7 @@ export default function App() {
     signerAddress: eoaAddress,
     signerWallet: embeddedWallet,
     privyDid: user?.id ?? '',
+    chainIds: getOnboardingChainIds(),
   });
 
   const { requestId, request, loading: requestLoading, error: requestError } = useRequest(backendUrl);
@@ -152,6 +154,10 @@ export default function App() {
               privyToken={privyToken}
               backendUrl={backendUrl}
               serializedBlob={delegatedKey.serializedBlob}
+              serializedBlobs={delegatedKey.serializedBlobs}
+              installedChainIds={delegatedKey.installedChainIds}
+              installOnChain={delegatedKey.installOnChain}
+              delegationState={delegatedKey.state}
               keyStatus={delegatedKey.state.status}
             />
           );

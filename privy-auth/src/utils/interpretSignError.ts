@@ -17,6 +17,12 @@ export type SignErrorCode =
   | 'timeout'
   | 'rate_limited'
   | 'service_unavailable'
+  | 'aster_pair_inactive'
+  | 'aster_min_size'
+  | 'aster_max_position'
+  | 'aster_oracle_stale'
+  | 'aster_insufficient_collateral'
+  | 'stock_recovery_failed'
   | 'unknown';
 
 export type InterpretedError = {
@@ -110,6 +116,39 @@ const PATTERNS: Array<{ test: RegExp; friendly: string; code: SignErrorCode }> =
     test: /\b(503|service unavailable)\b/i,
     friendly: 'Service is temporarily unavailable. Try again in a moment.',
     code: 'service_unavailable',
+  },
+  // Aster (BSC tokenized stocks) — patterns refined after first cohort of test
+  // trades; initial regexes are best-guess. Codes are the contract shared with
+  // the BE's notifyResolved.ts recovery branch (see BE plan P2.5b).
+  {
+    test: /pair.*inactive|PAIR_INACTIVE/i,
+    friendly: 'This stock pair is not currently tradable. Try a different symbol or try again later.',
+    code: 'aster_pair_inactive',
+  },
+  {
+    test: /below.*minimum|MIN_TRADE_SIZE|41535345545f4d494e/i,
+    friendly: 'Trade size is below the minimum. Try a larger amount.',
+    code: 'aster_min_size',
+  },
+  {
+    test: /max.*position|POSITION_LIMIT/i,
+    friendly: "You've hit the per-user position limit for this asset.",
+    code: 'aster_max_position',
+  },
+  {
+    test: /oracle.*stale|STALE_PRICE/i,
+    friendly: 'Stock price oracle is stale. Please try again in a moment.',
+    code: 'aster_oracle_stale',
+  },
+  {
+    test: /insufficient.*collateral|amountIn.*too.*low/i,
+    friendly: 'Bridge delivered less USDC than expected. Returning your funds…',
+    code: 'aster_insufficient_collateral',
+  },
+  {
+    test: /stock_recovery_failed|recovery.*failed/i,
+    friendly: 'Recovery failed — please contact support with your transaction hashes.',
+    code: 'stock_recovery_failed',
   },
 ];
 

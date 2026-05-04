@@ -11,15 +11,14 @@ import { FullScreen } from '../atomics/FullScreen';
 import { Spinner } from '../atomics/spinner';
 import { ShieldIcon } from '../atomics/icons';
 import type { DelegationState } from '../../hooks/useDelegatedKey';
+import { BscDelegationModal } from '../BscDelegationModal';
 import { createLogger } from '../../utils/logger';
 import { interpretSignError, type InterpretedError } from '../../utils/interpretSignError';
 import { findRecentBroadcast, trackInFlightBroadcast } from '../../utils/recentBroadcasts';
+import { getChainId, getPaymasterUrl } from '../../utils/chainConfig';
 
 const log = createLogger('SignHandler');
 
-const BUNDLER_URL    = (import.meta.env.VITE_PIMLICO_BUNDLER_URL              as string) ?? '';
-const PAYMASTER_URL  = (import.meta.env.VITE_PIMLICO_PAYMASTER_URL            as string) ?? '';
-const SPONSORSHIP_ID = (import.meta.env.VITE_PIMLICO_SPONSORSHIP_POLICY_ID    as string) ?? '';
 // Fallback timeout only starts once the delegated key is no longer being restored.
 // While unlock() is in-flight we wait indefinitely — the timer is for the case
 // where the blob is genuinely unavailable (no stored key, decrypt failed, etc.).
@@ -33,30 +32,37 @@ export function SignHandler({
   privyToken,
   backendUrl,
   serializedBlob,
+  serializedBlobs,
+  installedChainIds,
+  installOnChain,
+  delegationState,
   keyStatus,
 }: {
   request: SignRequest;
   privyToken: string;
   backendUrl: string;
   serializedBlob: string | null;
+  serializedBlobs?: Record<number, string>;
+  installedChainIds?: number[];
+  installOnChain?: (chainId: number) => void;
+  delegationState?: DelegationState;
   keyStatus: DelegationState['status'];
 }) {
   const { wallets } = useWallets();
   const embedded = wallets.find((w) => w.walletClientType === 'privy');
-  const sudoClientRef = React.useRef<KernelAccountClient | null>(null);
+  const sudoClientByChainRef = React.useRef<Map<number, KernelAccountClient>>(new Map());
 
-  const getSudoClient = React.useCallback(async (): Promise<KernelAccountClient> => {
-    if (sudoClientRef.current) return sudoClientRef.current;
+  const getSudoClient = React.useCallback(async (chainId: number): Promise<KernelAccountClient> => {
+    const cached = sudoClientByChainRef.current.get(chainId);
+    if (cached) return cached;
     if (!embedded) throw new Error('Embedded wallet not available');
     const provider = await embedded.getEthereumProvider();
     const c = await createSudoClient(
       provider,
       embedded.address as `0x${string}`,
-      BUNDLER_URL,
-      PAYMASTER_URL || undefined,
-      SPONSORSHIP_ID || undefined,
+      chainId,
     );
-    sudoClientRef.current = c;
+    sudoClientByChainRef.current.set(chainId, c);
     return c;
   }, [embedded]);
 
@@ -65,8 +71,22 @@ export function SignHandler({
   const [done, setDone] = React.useState(false);
   const [autoSignError, setAutoSignError] = React.useState<InterpretedError | null>(null);
   const autoSignAttemptedRef = React.useRef(false);
-  // Cache the session client across swap steps to avoid re-paying init cost.
-  const sessionClientRef = React.useRef<SessionClient | null>(null);
+  // Cache session clients per chain so cross-chain step lists (e.g. /stock buy
+  // bridges Avax → BSC) don't re-pay the deserialize cost on every chain switch.
+  const sessionClientByChainRef = React.useRef<Map<number, SessionClient>>(new Map());
+
+  const getSessionClient = React.useCallback(async (chainId: number): Promise<SessionClient> => {
+    const cached = sessionClientByChainRef.current.get(chainId);
+    if (cached) return cached;
+    const blob = serializedBlobs?.[chainId] ?? serializedBlob;
+    if (!blob) throw new Error(`no session-key blob for chain ${chainId}`);
+    const c = await createSessionKeyClient(blob, chainId);
+    if (c.chain?.id !== chainId) {
+      throw new Error(`session client chain mismatch: built ${c.chain?.id}, requested ${chainId}`);
+    }
+    sessionClientByChainRef.current.set(chainId, c);
+    return c;
+  }, [serializedBlob, serializedBlobs]);
 
   // Resync when the parent swaps in a different request (distinct requestId).
   // useState initializer only fires once, so without this the first request
@@ -100,10 +120,17 @@ export function SignHandler({
     [currentRequest, privyToken, backendUrl],
   );
 
+  const reqChainIdForGate = currentRequest.chainId ?? getChainId();
+  const needsCrossChainApproval =
+    !!installedChainIds &&
+    installedChainIds.length > 0 &&
+    !installedChainIds.includes(reqChainIdForGate);
+
   // Auto-sign: fire once per currentRequest; re-runs when currentRequest changes
   // (i.e. when next swap step arrives). Falls back to manual after timeout.
   React.useEffect(() => {
     if (done) return;
+    if (needsCrossChainApproval) return; // wait for the user to approve on the new chain
     if (!currentRequest.autoSign || autoSignAttemptedRef.current) return;
 
     if (!serializedBlob) {
@@ -120,38 +147,31 @@ export function SignHandler({
     }
 
     autoSignAttemptedRef.current = true;
-    log.info('step', { step: 'started', requestId: currentRequest.requestId });
+    const reqChainId = currentRequest.chainId ?? getChainId();
+    log.info('step', { step: 'started', requestId: currentRequest.requestId, chainId: reqChainId });
     log.debug('autoSign start', {
       requestId: currentRequest.requestId,
+      chainId: reqChainId,
       blobLen: serializedBlob.length,
-      hasRpc: !!BUNDLER_URL,
-      hasPaymaster: !!PAYMASTER_URL,
+      hasPaymaster: !!getPaymasterUrl(reqChainId),
       to: currentRequest.to,
       value: currentRequest.value,
       dataLen: currentRequest.data.length,
     });
 
     (async () => {
-      let sessionClient = sessionClientRef.current;
-      if (!sessionClient) {
-        try {
-          sessionClient = await createSessionKeyClient(
-            serializedBlob,
-            BUNDLER_URL,
-            PAYMASTER_URL || undefined,
-            SPONSORSHIP_ID || undefined,
-          );
-          sessionClientRef.current = sessionClient;
-          log.debug('session client built', { account: sessionClient.account?.address });
-        } catch (err) {
-          const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-          const interpreted = interpretSignError(err);
-          log.error('createSessionKeyClient failed', { requestId: currentRequest.requestId, err: msg }, { toast: false });
-          log.warn(interpreted.friendly, { requestId: currentRequest.requestId });
-          if (err instanceof Error && err.stack) log.debug('stack', { stack: err.stack });
-          setAutoSignError(interpreted);
-          return;
-        }
+      let sessionClient: SessionClient;
+      try {
+        sessionClient = await getSessionClient(reqChainId);
+        log.debug('session client built', { account: sessionClient.account?.address, chainId: reqChainId });
+      } catch (err) {
+        const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+        const interpreted = interpretSignError(err);
+        log.error('createSessionKeyClient failed', { requestId: currentRequest.requestId, chainId: reqChainId, err: msg }, { toast: false });
+        log.warn(interpreted.friendly, { requestId: currentRequest.requestId, chainId: reqChainId });
+        if (err instanceof Error && err.stack) log.debug('stack', { stack: err.stack });
+        setAutoSignError(interpreted);
+        return;
       }
 
       // Payload-level dedupe: if this exact (to, value, data) was already
@@ -260,7 +280,7 @@ export function SignHandler({
         // cheap (one decrypt + a few RPCs) and matches the old per-step
         // open/close behaviour. Scope: this branch only — single-step flows
         // (/send, /yield single-tx) never reach here, so they are unaffected.
-        sessionClientRef.current = null;
+        sessionClientByChainRef.current.delete(reqChainId);
         autoSignAttemptedRef.current = false;
         setCurrentRequest(nextRequest as SignRequest);
       } else {
@@ -269,7 +289,22 @@ export function SignHandler({
         setTimeout(() => window.Telegram?.WebApp?.close(), CLOSE_DELAY_MS);
       }
     })();
-  }, [currentRequest, serializedBlob, keyStatus, reportTxHash, backendUrl, privyToken, done]);
+  }, [currentRequest, serializedBlob, keyStatus, reportTxHash, backendUrl, privyToken, done, needsCrossChainApproval]);
+
+  if (needsCrossChainApproval && installOnChain) {
+    return (
+      <BscDelegationModal
+        chainId={reqChainIdForGate}
+        installOnChain={installOnChain}
+        delegationState={delegationState}
+        installedChainIds={installedChainIds!}
+        onCancel={() => {
+          sendReject();
+          window.Telegram?.WebApp?.close();
+        }}
+      />
+    );
+  }
 
   if (done) {
     return (
@@ -309,8 +344,7 @@ export function SignHandler({
             </p>
           </details>
           <div className="bg-white/5 border border-white/10 rounded-lg p-3 text-left text-xs text-white/60 space-y-1">
-            <div>bundler: {BUNDLER_URL ? 'set' : 'MISSING'}</div>
-            <div>paymaster: {PAYMASTER_URL ? 'set' : 'MISSING'}</div>
+            <div>chainId: {currentRequest.chainId ?? getChainId()}</div>
             <div>to: <span className="break-all">{currentRequest.to}</span></div>
             <div>value: {currentRequest.value}</div>
             <div>dataLen: {currentRequest.data.length}</div>
@@ -388,8 +422,9 @@ export function SignHandler({
       }}
       approve={async () => {
         if (!embedded) throw new Error('Smart wallet not ready');
-        log.info('step', { step: 'started', requestId: currentRequest.requestId, path: 'manual' });
-        const sudoClient = await getSudoClient();
+        const reqChainId = currentRequest.chainId ?? getChainId();
+        log.info('step', { step: 'started', requestId: currentRequest.requestId, chainId: reqChainId, path: 'manual' });
+        const sudoClient = await getSudoClient(reqChainId);
         const hash = await sudoClient.sendTransaction({
           to: currentRequest.to as `0x${string}`,
           value: BigInt(currentRequest.value),
@@ -397,7 +432,7 @@ export function SignHandler({
           account: sudoClient.account!,
           chain: null,
         });
-        log.info('step', { step: 'succeeded', requestId: currentRequest.requestId, hash, path: 'manual' });
+        log.info('step', { step: 'succeeded', requestId: currentRequest.requestId, chainId: reqChainId, hash, path: 'manual' });
         await reportTxHash(hash);
         setTimeout(() => window.Telegram?.WebApp?.close(), CLOSE_DELAY_MS);
       }}

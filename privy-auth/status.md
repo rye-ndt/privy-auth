@@ -427,3 +427,35 @@ Order in handler: check `findRecentBroadcast` first (reuse hash, skip send); els
 - `useRequest` reads `requestId` once at mount. For chained swap steps, `SignHandler` uses `fetchNextRequest` directly — URL stays fixed.
 - Manual-sign userOps go through `createSudoClient(provider, eoa, ...)` — `useSmartWallets()` and `SmartWalletsProvider` are gone (removed 2026-05-03). FE+BE `aaConfig.ts` MUST stay in lockstep (entry point 0.7, Kernel V3.1, `index = 0n`).
 - No test runner — static stateless-routing regression guard deferred until vitest is added.
+
+---
+
+## 2026-05-04 — Multi-chain (BSC) support for Aster tokenized stocks
+
+**What changed:**
+- `utils/chainConfig.ts` is now a real multi-chain registry (`CHAIN_REGISTRY`). Per-chain helpers (`getChainById`, `getRpcUrlById`, `getBundlerUrl`, `getPaymasterUrl`, `getSponsorshipPolicyId`, `isSupportedChain`, `getOnboardingChainIds`). Backwards-compatible `getChain()` / `getChainId()` / `getRpcUrl()` continue to resolve to the home chain (`VITE_CHAIN_ID`, default 43114).
+- `createSudoClient(provider, signerAddress, chainId)` and `createSessionKeyClient(serializedBlob, chainId)` and `installSessionKey(provider, signerAddress, sk, addr, chainId)` are all **chain-id-aware**. The old (bundler/paymaster URL) parameter forms are gone — never re-introduce them. Bundler/paymaster URLs come from the registry by `chainId`.
+- `SignHandler` and `YieldDepositHandler` cache `KernelAccountClient` instances **per chainId** (`Map<number, ...>`). Cross-chain step lists (e.g. `/stock buy` bridging Avax → BSC) re-use cached clients within the session. Each client carries `chain.id`; an assertion catches accidental drift.
+- `SignHandler` reads `request.chainId ?? getChainId()` per step and passes it to both `getSessionClient` and `getSudoClient`. Logs include `chainId`.
+
+**Multi-chain delegation:**
+- `useDelegatedKey({ chainIds })` installs the **same** session-key keypair on each chain in sequence. Storage payload now carries `{ privateKey, address, blobs: Record<chainId, blob>, installedChainIds: number[] }`. Legacy single-`blob` storage still decodes (assumed home chain).
+- Eager onboarding (`App.tsx`) defaults to `getOnboardingChainIds()` — home chain plus BSC when `VITE_BSC_PIMLICO_BUNDLER_URL` is set. Skipped automatically otherwise (no broken popups).
+- Existing-user top-up: when a `SignRequest.chainId` arrives for a chain not yet installed, `SignHandler` renders `BscDelegationModal` instead of auto-signing. The user signs once; `installOnChain(chainId)` installs and the parent re-renders, auto-sign proceeds.
+- `ApprovalOnboarding` now fetches `/delegation/approval-params?chainId=…` and POSTs `/delegation/grant` **per chain** sequentially. Body includes `{ delegations, chainId }` for each. BE plan P2.3 is the contract.
+
+**New env vars:**
+- `VITE_BSC_RPC_URL`, `VITE_BSC_PIMLICO_BUNDLER_URL`, `VITE_BSC_PIMLICO_PAYMASTER_URL`, `VITE_BSC_PIMLICO_SPONSORSHIP_POLICY_ID`.
+- `VITE_ONBOARDING_CHAIN_IDS` (optional comma-separated override).
+
+**Sign-error codes (lockstep with BE `notifyResolved.ts`):**
+Added `aster_pair_inactive`, `aster_min_size`, `aster_max_position`, `aster_oracle_stale`, `aster_insufficient_collateral`, `stock_recovery_failed` to `SignErrorCode` + `PATTERNS`. Adding any new code requires the matching BE branch in the same PR.
+
+**Recovery flow (BSC venue revert):**
+There is no in-session recovery. The BE corrects design (see BE plan P2.5) emits a fresh `mini_app` artifact for the return swap; the user closes the failed mini-app, taps the new chat prompt, signs once. The FE needed zero new code for this — only the `aster_*` error mappings.
+
+**Conventions added:**
+- New scopes: `BscDelegationModal`, `ApprovalOnboarding` (logger added).
+- Per-chain client caches must use `Map<number, KernelAccountClient>` (or `SessionClient`) — never a single ref. Drop a chain's entry on `'next swap step'` invalidation, not all entries.
+- All sign-related logs include `chainId`. Same for `installSessionKey` / `createSessionKeyClient` debug.
+- `aaConfig.ts` (FE) ↔ `aaConfig.ts` (BE) byte-identical — chain-agnostic, do not change for this feature.

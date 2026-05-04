@@ -7,7 +7,13 @@ import { createPimlicoClient } from 'permissionless/clients/pimlico';
 import type { EIP1193Provider } from 'viem';
 import type { KernelAccountClient } from '@zerodev/sdk';
 import { AA_CONFIG, getAaEntryPoint } from './aaConfig';
-import { getChain, getRpcUrl } from './chainConfig';
+import {
+  getChainById,
+  getRpcUrlById,
+  getBundlerUrl,
+  getPaymasterUrl,
+  getSponsorshipPolicyId,
+} from './chainConfig';
 import { createLogger } from './logger';
 
 const log = createLogger('createSudoClient');
@@ -15,12 +21,15 @@ const log = createLogger('createSudoClient');
 export async function createSudoClient(
   provider: EIP1193Provider,
   signerAddress: `0x${string}`,
-  bundlerRpc: string,
-  paymasterUrl?: string,
-  sponsorshipPolicyId?: string,
+  chainId: number,
 ): Promise<KernelAccountClient> {
-  const chain = getChain();
-  const publicClient = createPublicClient({ chain, transport: http(getRpcUrl()) });
+  const chain = getChainById(chainId);
+  const rpcUrl = getRpcUrlById(chainId);
+  const bundlerRpc = getBundlerUrl(chainId);
+  const paymasterUrl = getPaymasterUrl(chainId);
+  const sponsorshipPolicyId = getSponsorshipPolicyId(chainId);
+
+  const publicClient = createPublicClient({ chain, transport: http(rpcUrl) });
   const entryPoint = getAaEntryPoint();
 
   const walletClient = createWalletClient({
@@ -54,6 +63,7 @@ export async function createSudoClient(
   log.debug('creating sudo Kernel client', {
     signerAddress,
     sca: account.address,
+    chainId,
     hasPaymaster: !!paymasterUrl,
   });
 

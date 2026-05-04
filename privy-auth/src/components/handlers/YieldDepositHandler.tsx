@@ -11,12 +11,10 @@ import { FullScreen } from '../atomics/FullScreen';
 import { Spinner } from '../atomics/spinner';
 import { ShieldIcon } from '../atomics/icons';
 import { createLogger } from '../../utils/logger';
+import { getChainId } from '../../utils/chainConfig';
 
 const log = createLogger('YieldDepositHandler');
 
-const BUNDLER_URL    = (import.meta.env.VITE_PIMLICO_BUNDLER_URL              as string) ?? '';
-const PAYMASTER_URL  = (import.meta.env.VITE_PIMLICO_PAYMASTER_URL            as string) ?? '';
-const SPONSORSHIP_ID = (import.meta.env.VITE_PIMLICO_SPONSORSHIP_POLICY_ID    as string) ?? '';
 const CLOSE_DELAY_MS = 1500;
 
 type SessionClient = Awaited<ReturnType<typeof createSessionKeyClient>>;
@@ -37,20 +35,20 @@ export function YieldDepositHandler({
 }) {
   const { wallets } = useWallets();
   const embedded = wallets.find((w) => w.walletClientType === 'privy');
-  const sudoClientRef = React.useRef<KernelAccountClient | null>(null);
+  const sudoClientByChainRef = React.useRef<Map<number, KernelAccountClient>>(new Map());
+  const reqChainId = request.chainId ?? getChainId();
 
-  const getSudoClient = React.useCallback(async (): Promise<KernelAccountClient> => {
-    if (sudoClientRef.current) return sudoClientRef.current;
+  const getSudoClient = React.useCallback(async (chainId: number): Promise<KernelAccountClient> => {
+    const cached = sudoClientByChainRef.current.get(chainId);
+    if (cached) return cached;
     if (!embedded) throw new Error('Embedded wallet not available');
     const provider = await embedded.getEthereumProvider();
     const c = await createSudoClient(
       provider,
       embedded.address as `0x${string}`,
-      BUNDLER_URL,
-      PAYMASTER_URL || undefined,
-      SPONSORSHIP_ID || undefined,
+      chainId,
     );
-    sudoClientRef.current = c;
+    sudoClientByChainRef.current.set(chainId, c);
     return c;
   }, [embedded]);
 
@@ -91,7 +89,7 @@ export function YieldDepositHandler({
         account: sc.account!,
         chain: null,
       });
-      log.info('step', { step: 'submitted', requestId: request.requestId, mode, hash });
+      log.info('step', { step: 'submitted', requestId: request.requestId, chainId: reqChainId, mode, hash });
       await reportTxHash(hash);
 
       // Check for queued follow-up step (defensive — yield doesn't chain today but safe to handle).
@@ -101,7 +99,7 @@ export function YieldDepositHandler({
         log.warn('fetchNextRequest failed', { requestId: request.requestId, err: String(err) });
       }
 
-      log.info('step', { step: 'succeeded', requestId: request.requestId, mode });
+      log.info('step', { step: 'succeeded', requestId: request.requestId, chainId: reqChainId, mode });
       setPhase('done');
       setTimeout(() => window.Telegram?.WebApp?.close(), CLOSE_DELAY_MS);
     },
@@ -115,25 +113,20 @@ export function YieldDepositHandler({
     if (!serializedBlob) return;
 
     autoSignAttemptedRef.current = true;
-    log.info('step', { step: 'started', requestId: request.requestId, mode });
-    log.debug('autoSign start', { requestId: request.requestId, mode });
+    log.info('step', { step: 'started', requestId: request.requestId, chainId: reqChainId, mode });
+    log.debug('autoSign start', { requestId: request.requestId, chainId: reqChainId, mode });
 
     (async () => {
       try {
         let sc = sessionClientRef.current;
         if (!sc) {
-          sc = await createSessionKeyClient(
-            serializedBlob,
-            BUNDLER_URL,
-            PAYMASTER_URL || undefined,
-            SPONSORSHIP_ID || undefined,
-          );
+          sc = await createSessionKeyClient(serializedBlob, reqChainId);
           sessionClientRef.current = sc;
         }
         await executeSign(sc);
       } catch (err) {
         const msg = toErrorMessage(err);
-        log.error('autoSign failed', { requestId: request.requestId, mode, err: msg });
+        log.error('autoSign failed', { requestId: request.requestId, chainId: reqChainId, mode, err: msg });
         setError(msg);
         setPhase('presign');
         autoSignAttemptedRef.current = false;
@@ -145,9 +138,9 @@ export function YieldDepositHandler({
     if (!embedded) return;
     setPhase('signing');
     setError(null);
-    log.info('step', { step: 'started', requestId: request.requestId, mode, path: 'manual' });
+    log.info('step', { step: 'started', requestId: request.requestId, chainId: reqChainId, mode, path: 'manual' });
     try {
-      const sudoClient = await getSudoClient();
+      const sudoClient = await getSudoClient(reqChainId);
       const hash = await sudoClient.sendTransaction({
         to: request.to as `0x${string}`,
         value: BigInt(request.value),
@@ -155,13 +148,13 @@ export function YieldDepositHandler({
         account: sudoClient.account!,
         chain: null,
       });
-      log.info('step', { step: 'succeeded', requestId: request.requestId, mode, hash, path: 'manual' });
+      log.info('step', { step: 'succeeded', requestId: request.requestId, chainId: reqChainId, mode, hash, path: 'manual' });
       await reportTxHash(hash);
       setPhase('done');
       setTimeout(() => window.Telegram?.WebApp?.close(), CLOSE_DELAY_MS);
     } catch (err) {
       const msg = toErrorMessage(err);
-      log.error('manual sign failed', { requestId: request.requestId, mode, err: msg });
+      log.error('manual sign failed', { requestId: request.requestId, chainId: reqChainId, mode, err: msg });
       setError(msg);
       setPhase('presign');
     }

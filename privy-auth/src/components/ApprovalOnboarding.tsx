@@ -5,6 +5,10 @@ import { loggedFetch } from '../utils/loggedFetch';
 import { toErrorMessage } from '../utils/toErrorMessage';
 import { ShieldIcon } from './atomics/icons';
 import { Spinner } from './atomics/spinner';
+import { chainName, getOnboardingChainIds } from '../utils/chainConfig';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('ApprovalOnboarding');
 
 interface ApprovalParam {
   tokenAddress: string;
@@ -23,7 +27,11 @@ interface ApprovalOnboardingProps {
   reapproval?: boolean;
   tokenAddress?: string;
   amountRaw?: string;
+  /** Chains to fetch approval params for and post grants on. Defaults to onboarding chain ids. */
+  chainIds?: number[];
 }
+
+type PerChainParams = Record<number, ApprovalParam[]>;
 
 const backendUrl = (import.meta.env.VITE_BACKEND_URL as string) ?? '';
 const CLOSE_DELAY_MS = 1500;
@@ -48,8 +56,18 @@ export function ApprovalOnboarding({
   reapproval = false,
   tokenAddress,
   amountRaw,
+  chainIds,
 }: ApprovalOnboardingProps) {
-  const [approvalParams, setApprovalParams] = React.useState<ApprovalParam[] | null>(null);
+  const targetChainIds = React.useMemo(
+    () => chainIds ?? getOnboardingChainIds(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(chainIds ?? getOnboardingChainIds())],
+  );
+  const [paramsByChain, setParamsByChain] = React.useState<PerChainParams | null>(null);
+  // Flat view used by the rendered list — concatenates all chains' rows.
+  const approvalParams = paramsByChain
+    ? targetChainIds.flatMap((cid) => paramsByChain[cid] ?? [])
+    : null;
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [approveClicked, setApproveClicked] = React.useState(false);
   const [posting, setPosting] = React.useState(false);
@@ -62,51 +80,76 @@ export function ApprovalOnboarding({
       ? `?tokenAddress=${encodeURIComponent(tokenAddress)}&amountRaw=${encodeURIComponent(amountRaw)}`
       : '';
 
-    loggedFetch(`${backendUrl}/delegation/approval-params${qs}`, {
-      headers: { Authorization: `Bearer ${backendJwt}` },
-    })
-      .then((r) => {
-        if (!r.ok) throw new Error(`Server returned ${r.status}`);
-        return r.json() as Promise<{ tokens: ApprovalParam[] }>;
+    let cancelled = false;
+    Promise.all(
+      targetChainIds.map((cid) =>
+        loggedFetch(`${backendUrl}/delegation/approval-params${qs}${qs ? '&' : '?'}chainId=${cid}`, {
+          headers: { Authorization: `Bearer ${backendJwt}` },
+        })
+          .then((r) => {
+            if (!r.ok) throw new Error(`Server returned ${r.status}`);
+            return r.json() as Promise<{ tokens: ApprovalParam[] }>;
+          })
+          .then((data) => [cid, data.tokens ?? []] as const),
+      ),
+    )
+      .then((entries) => {
+        if (cancelled) return;
+        const map: PerChainParams = {};
+        for (const [cid, tokens] of entries) map[cid] = tokens;
+        setParamsByChain(map);
       })
-      .then((data) => setApprovalParams(data.tokens ?? []))
-      .catch((err) => setLoadError(toErrorMessage(err)));
-  }, [backendJwt, tokenAddress, amountRaw]);
+      .catch((err) => { if (!cancelled) setLoadError(toErrorMessage(err)); });
+    return () => { cancelled = true; };
+  }, [backendJwt, tokenAddress, amountRaw, targetChainIds]);
 
   // After the user clicks Approve and the session key is installed, post the limits.
   React.useEffect(() => {
     if (!approveClicked || posting || success) return;
     if (delegatedKey.state.status !== 'done') return;
-    if (!approvalParams) return;
+    if (!paramsByChain) return;
 
     setPosting(true);
     setPostError(null);
 
-    const delegations = approvalParams.map((p) => ({
-      tokenAddress: p.tokenAddress,
-      tokenSymbol: p.tokenSymbol,
-      tokenDecimals: p.tokenDecimals,
-      limitRaw: p.suggestedLimitRaw,
-      validUntil: p.validUntil,
-    }));
-
-    loggedFetch(`${backendUrl}/delegation/grant`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${backendJwt}`,
-      },
-      body: JSON.stringify({ delegations }),
-    })
-      .then((r) => {
-        if (!r.ok) throw new Error(`Backend returned ${r.status}`);
+    (async () => {
+      try {
+        for (const cid of targetChainIds) {
+          const tokens = paramsByChain[cid] ?? [];
+          if (tokens.length === 0) {
+            log.debug('skip-empty', { chainId: cid });
+            continue;
+          }
+          const delegations = tokens.map((p) => ({
+            tokenAddress: p.tokenAddress,
+            tokenSymbol: p.tokenSymbol,
+            tokenDecimals: p.tokenDecimals,
+            limitRaw: p.suggestedLimitRaw,
+            validUntil: p.validUntil,
+          }));
+          const r = await loggedFetch(`${backendUrl}/delegation/grant`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${backendJwt}`,
+            },
+            body: JSON.stringify({ delegations, chainId: cid }),
+          });
+          if (!r.ok) throw new Error(`Backend returned ${r.status} for chain ${cid}`);
+          log.info('grant-posted', { chainId: cid, count: delegations.length });
+        }
         setSuccess(true);
         setTimeout(() => window.Telegram?.WebApp?.close(), CLOSE_DELAY_MS);
-      })
-      .catch((err) => setPostError(toErrorMessage(err)))
-      .finally(() => setPosting(false));
+      } catch (err) {
+        const msg = toErrorMessage(err);
+        log.error('grant-post-failed', { err: msg });
+        setPostError(msg);
+      } finally {
+        setPosting(false);
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [delegatedKey.state.status, approveClicked]);
+  }, [delegatedKey.state.status, approveClicked, paramsByChain]);
 
   const handleApprove = () => {
     setApproveClicked(true);
@@ -121,10 +164,20 @@ export function ApprovalOnboarding({
       ? delegatedKey.state.message
       : null;
   const working = installing || posting;
+  const stepperLabel =
+    installing && delegatedKey.state.status === 'processing'
+      ? (() => {
+          const cid = delegatedKey.state.chainId;
+          if (cid && targetChainIds.length > 1) {
+            const idx = targetChainIds.indexOf(cid) + 1;
+            return `${delegatedKey.state.step} (${idx}/${targetChainIds.length})`;
+          }
+          return delegatedKey.state.step;
+        })()
+      : null;
   const progressStep =
-    installing && delegatedKey.state.status === 'processing' ? delegatedKey.state.step :
-    posting ? 'Saving limits…' :
-    null;
+    stepperLabel ??
+    (posting ? 'Saving limits…' : null);
 
   return (
     <div className="flex flex-col items-center justify-center w-full min-h-dvh bg-[#0f0f1a] px-6 gap-6">
@@ -142,7 +195,9 @@ export function ApprovalOnboarding({
         <p className="text-sm text-white/40 leading-relaxed">
           {reapproval
             ? 'Your spending limit has been reached. Approve a new limit to let the bot continue trading on your behalf.'
-            : 'To let the bot trade on your behalf, approve the following spending limits (one-time, revocable):'}
+            : targetChainIds.length > 1
+              ? `We'll enable the agent on ${targetChainIds.map(chainName).join(' and ')} so you can trade everywhere with one approval. ${targetChainIds.length} quick signatures.`
+              : 'To let the bot trade on your behalf, approve the following spending limits (one-time, revocable):'}
         </p>
       </div>
 

@@ -12,7 +12,13 @@ import { toSudoPolicy } from '@zerodev/permissions/policies';
 import type { EIP1193Provider } from 'viem';
 import type { KernelAccountClient } from '@zerodev/sdk';
 import { createLogger } from './logger';
-import { getChain, getRpcUrl } from './chainConfig';
+import {
+  getChainById,
+  getRpcUrlById,
+  getBundlerUrl,
+  getPaymasterUrl,
+  getSponsorshipPolicyId,
+} from './chainConfig';
 
 const log = createLogger('crypto');
 
@@ -111,8 +117,10 @@ export async function installSessionKey(
   signerAddress: `0x${string}`,
   sessionPrivateKey: `0x${string}`,
   sessionKeyAddress: `0x${string}`,
+  chainId: number,
 ): Promise<string> {
-  const chain = getChain();
+  const chain = getChainById(chainId);
+  const rpcUrl = getRpcUrlById(chainId);
 
   // 1. Build a viem WalletClient backed by the Privy embedded wallet provider
   const walletClient = createWalletClient({
@@ -128,10 +136,7 @@ export async function installSessionKey(
   //    ZeroDev uses this for eth_call / eth_getCode against the kernel factory and
   //    validator contracts; bundler-only endpoints return non-standard revert
   //    envelopes that crash viem's error decoder ("revertError.cause.data.match").
-  const publicClient = createPublicClient({
-    transport: http(getRpcUrl()),
-    chain,
-  });
+  const publicClient = createPublicClient({ transport: http(rpcUrl), chain });
 
   const entryPoint = getEntryPoint('0.7');
   const kernelVersion = KERNEL_V3_1;
@@ -165,6 +170,8 @@ export async function installSessionKey(
     kernelVersion,
   });
 
+  log.debug('installSessionKey', { chainId, signerAddress, sessionKeyAddress });
+
   // 8. Serialize with the session private key embedded.
   //    This triggers the Privy popup — the owner signs the UserOp that installs the plugin on-chain.
   //    The returned blob is stored encrypted in CloudStorage; it is never sent to the backend.
@@ -178,20 +185,27 @@ export async function installSessionKey(
 
 export async function createSessionKeyClient(
   serializedBlob: string,
-  bundlerRpc: string,
-  paymasterUrl?: string,
-  sponsorshipPolicyId?: string,
+  chainId: number,
 ): Promise<KernelAccountClient> {
+  // Fail fast if this build wasn't configured with a bundler URL for the requested chain.
+  let bundlerRpc: string;
+  try {
+    bundlerRpc = getBundlerUrl(chainId);
+  } catch {
+    throw new Error(`Chain ${chainId} is not configured in this build (missing bundler URL)`);
+  }
+  const paymasterUrl = getPaymasterUrl(chainId);
+  const sponsorshipPolicyId = getSponsorshipPolicyId(chainId);
+
   log.debug('createSessionKeyClient', {
+    chainId,
     hasPaymaster: !!paymasterUrl,
     hasPolicy: !!sponsorshipPolicyId,
   });
   try {
-    const chain = getChain();
-    const publicClient = createPublicClient({
-      transport: http(getRpcUrl()),
-      chain,
-    });
+    const chain = getChainById(chainId);
+    const rpcUrl = getRpcUrlById(chainId);
+    const publicClient = createPublicClient({ transport: http(rpcUrl), chain });
     const entryPoint = getEntryPoint('0.7');
 
     // Reconstructs the full KernelSmartAccount from the serialized blob.
@@ -233,7 +247,7 @@ export async function createSessionKeyClient(
     });
   } catch (err) {
     const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-    log.error('createSessionKeyClient failed', { err: msg });
+    log.error('createSessionKeyClient failed', { chainId, err: msg });
     throw err;
   }
 }
