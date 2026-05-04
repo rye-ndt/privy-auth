@@ -1,5 +1,41 @@
 # Privy Auth Mini-App — Status Log
 
+## TabDock overflow fix (Telegram narrow viewport) — 2026-05-04
+
+**What was done:**
+- `StatusView.tsx` `TabDock`: 5 tabs (Home/Activity/Points/Config/Debug) overflowed Telegram's ~320–360px viewport. Switched buttons to `flex-1 min-w-0` with `px-1 py-2`, capped nav at `w-full max-w-md`, tightened gap/padding (`gap-0.5`, `p-1`), shrank outer horizontal padding `px-6` → `px-3`.
+- Replaced fixed `pb-6` with `pb-[max(env(safe-area-inset-bottom),1rem)]` so the dock clears the iOS home indicator instead of being hidden behind it.
+
+**Why:**
+- Tabs share width evenly via `flex-1` rather than each demanding intrinsic content width — fits any viewport ≥ ~300px without horizontal scroll.
+- `max-w-md` keeps the bar from stretching uncomfortably wide on tablets/desktop.
+- The safe-area inset is the standard fix for bottom-fixed UI in mini apps; previously was a regression on devices with home indicators.
+
+## Activity tab (Ankr-backed transfer history) — 2026-05-03
+
+**What was done:**
+- New `types/transferHistory.types.ts` — `TransferRecord` / `TransferHistoryPage` mirroring the BE `GET /transfers` shape.
+- New `hooks/useTransferHistory.ts` — paginated reader for `GET /transfers`. Mirrors `useLoyaltyHistory`'s cursor-via-ref pattern. Page 0 resets on `direction` change or `refresh()`. **No polling, no `refetchOnVisible`** — the BE cache TTL is 60 s and the Ankr free tier is shared, so reload is manual.
+- New `components/ActivityTab.tsx` — peer of `HomeTab` / `PointsTab` / `ConfigsTab` / `DebugTab`. Direction filter chips (All / Sent / Received), reverse-chronological list, `Load more` cursor pagination, manual `Refresh` button.
+- New `components/activity/TransferRow.tsx` and `components/activity/DirectionFilter.tsx` — single-card row + chip group. `buildExplorerUrl(chainId, txHash)` from `utils/chainConfig.ts` already exists; reused (no new helper).
+- `StatusView.tsx`: registered `'activity'` in the `Tab` union, mounted `<ActivityTab />`, added `ActivityIcon` and dock entry between Home and Points.
+- 401 → `unauthorized` state. **429 → `rateLimited` state with inline banner; warn-level log only, no toast spam.** Other non-2xx → `error` banner with retry, error-level log (also surfaces a Sonner toast per project logger convention).
+
+**Why:**
+- Activity is now a first-class surface so users can audit sends and receives without leaving the mini app, paired with the BE `get_transfer_history` agent tool from the same Ankr port. No DB writes — the BE serves from a Redis-cached Ankr response.
+- Page 0 reset on `direction` change avoids stale rows leaking between filter views; cursor-via-ref lets the effect read the latest cursor without re-running on every cursor change (same trick `useLoyaltyHistory` uses).
+- `Refresh` is a button rather than `refetchOnVisible` because the BE rate-guards Ankr per user and Telegram WebView re-focuses aggressively — a passive refetch on visibility would burn the per-user quota with no user signal.
+
+**Plan deviations (worth knowing):**
+- The plan listed `App.tsx` as the tab registry; the codebase reality is `StatusView.tsx` (App.tsx routes by `requestType`). Registered there.
+- The plan asked for `getExplorerTxUrl(chainId, hash)`; `buildExplorerUrl(chainId, txHash)` already exists with the same signature. Reused.
+- Tab placement: chose **Home → Activity → Points → Config → Debug** (Activity adjacent to Home since both are wallet-state views).
+
+**New conventions:**
+- **Never poll free-tier-backed endpoints.** Hooks reading endpoints that the BE serves via a third-party free tier (Ankr today; whoever tomorrow) MUST NOT use `refetchOnVisible` or any other passive refetch. Reload is user-initiated only — give the user a `Refresh` button. Rationale: BE caches with short TTL and per-user upstream gates are calibrated for user-driven reads; passive refetches multiply quota burn linearly with tab count and re-focus events.
+- **429 is a non-error UX state.** When a hook surfaces a rate-limit response, set a dedicated `rateLimited` boolean, render a banner, and log at `warn` level (not `error`) so Sonner doesn't toast it as a failure. The 429 path returns `null` from the response promise and short-circuits — it never falls through to the catch.
+- **Cursor type is opaque string.** Unlike the loyalty cursor (epoch number), the transfer history cursor is provider-defined and must be treated as a black-box `string`. Don't parse it, don't display it.
+
 ## Self-derived smart-account address — 2026-05-03
 
 **What was done:**
@@ -59,7 +95,7 @@ Telegram Mini App (TMA) for **Aegis**, an onchain AI agent. Handles Privy auth (
 
 ## Tech Stack
 - React 19 / Vite 8 / TypeScript (strict)
-- Privy v3 (`@privy-io/react-auth` + `/smart-wallets`)
+- Privy v3 (`@privy-io/react-auth`) — `/smart-wallets` removed 2026-05-03 (we derive SCA ourselves now)
 - `@tma.js/sdk-react` (dynamic-imported in `TelegramAutoLogin`)
 - `viem` + `permissionless` ^0.2
 - ZeroDev Kernel v3.1 + EntryPoint 0.7 (`@zerodev/sdk`, `@zerodev/ecdsa-validator`, `@zerodev/permissions`)
@@ -126,7 +162,7 @@ All read via `import.meta.env`, narrowed with `?? ''`. See `.env.example`.
 
 ## Entry Wiring (`main.tsx`)
 - Calls `Telegram.WebApp.ready()`, `.expand()`, header/background `#0f0f1a` **before** React mounts.
-- Providers: `StrictMode > PrivyProvider > SmartWalletsProvider > { TelegramAutoLogin, App }`.
+- Providers: `StrictMode > PrivyProvider > { TelegramAutoLogin, App }`. (No `SmartWalletsProvider` — removed 2026-05-03 with self-derived SCA.)
 - PrivyProvider: `loginMethods: ['google','telegram']`, dark theme, accent `#7c3aed`, `embeddedWallets.ethereum.createOnLogin: 'users-without-wallets'`.
 
 ## Top-Level Flow (`App.tsx`)
@@ -168,8 +204,7 @@ Responses: `POST {backendUrl}/response` via `postResponse()`. Shapes mirror requ
 | `GET  /loyalty/balance`                  | `useLoyaltyBalance` |
 | `GET  /loyalty/history?limit=&cursorCreatedAtEpoch=` | `useLoyaltyHistory` |
 | `GET  /loyalty/leaderboard?limit=`       | `useLoyaltyLeaderboard` (no auth header) |
-| `GET  /me`                               | `useUserProfile` — returns `{ pendingFlushed: number }` (one-shot; BE clears after first serve) |
-| `GET  /notifications?kind=&limit=`       | `useNotifications` — returns `{ items: NotificationItem[] }` |
+| `GET  /transfers?direction=&limit=&cursor=&fromEpoch=&toEpoch=` | `useTransferHistory` (Activity tab) — Ankr-backed, BE returns `{ items: TransferRecord[], nextCursor }`. 429 surfaces as a non-error UX state. |
 
 All authed calls send `Authorization: Bearer ${privyToken}`. 404/410 on `/request/:id` → "not found" / "expired".
 
@@ -184,13 +219,13 @@ Three-step effect chain, each ref-guarded against StrictMode:
 
 ### `SignHandler`
 - `currentRequest` state initialised from prop; resyncs when parent passes a new `requestId`.
-- `autoSign === true`: build session client via `createSessionKeyClient` (cached in `sessionClientRef` across steps), `sendTransaction({ chain: null })` wrapped in `trackInFlightBroadcast` (see "Broadcast dedupe" below), POST `{ txHash }`. Then `fetchNextRequest(...)` — if next, reset `autoSignAttemptedRef` + `setCurrentRequest(next)`; on 404, close.
-- Manual fallback (`autoSign:false`, or 10s timer with `keyStatus !== 'processing'`): render `<SigningRequestModal />`. Approve uses `useSmartWallets().client.sendTransaction` (Privy EOA path, no paymaster).
+- `autoSign === true`: build session client via `createSessionKeyClient` (cached in `sessionClientRef` across steps; cleared before chaining to next step — see "Stale session client" entry above), `sendTransaction({ chain: null })` wrapped in `trackInFlightBroadcast`, POST `{ txHash }`. Then `fetchNextRequest(...)` — if next, reset `autoSignAttemptedRef` + `setCurrentRequest(next)`; on 404, close.
+- Manual fallback (`autoSign:false`, or 10s timer with `keyStatus !== 'processing'`): render `<SigningRequestModal />`. Approve builds a sudo client lazily via `createSudoClient(provider, eoa, …)` (Privy EOA path, no Pimlico paymaster). Do **not** reintroduce `useSmartWallets()`.
 - Reject → POST `{ rejected: true }` + close.
 - Takes `keyStatus` prop; only arms 10s fallback when not `processing` (see Rule 5 below).
 
 ### `YieldDepositHandler`
-Single file; `mode: 'deposit' | 'withdraw'`. Auto-open-and-sign when `autoSign && serializedBlob`: opens in `'signing'`, runs the session-key pipeline, POSTs txHash, closes after 1500ms. Fallback shows pre-sign confirmation with `displayMeta` (protocol, token, amount, APY); manual send goes through `useSmartWallets().client`. Auto-sign failures fall back to the manual screen with inline error banner. Currently waits indefinitely on blob (no fallback timer).
+Single file; `mode: 'deposit' | 'withdraw'`. Auto-open-and-sign when `autoSign && serializedBlob`: opens in `'signing'`, runs the session-key pipeline, POSTs txHash, closes after 1500ms. Fallback shows pre-sign confirmation with `displayMeta` (protocol, token, amount, APY); manual send builds a sudo client via `createSudoClient(...)`. Auto-sign failures fall back to the manual screen with inline error banner. Currently waits indefinitely on blob (no fallback timer).
 
 ### `ApproveHandler`
 - `subtype === 'session_key'`: auto `startDelegatedKey()`, POST delegation record, close.
@@ -330,20 +365,9 @@ FE was reading `symbol`/`maxAmount`/`spent` but BE (`TokenDelegation`) emits `to
 - `atomics/icons.tsx`: `<ShieldIcon size? variant="violet|success">` (gradient id via `useId()`), `<GoogleIcon />`.
 - `atomics/FullScreen.tsx`: `<FullScreen>`, `<FullScreenLoading step?>`, `<FullScreenError message showClose?>`, `<FullScreenSuccess title subtitle?>` — caller still calls `.close()` itself.
 
-### Recipient notifications — activity feed (2026-04-27)
-**What:** Added read-only "Recent Transfers" section to `HomeTab` surfacing inbound p2p transfers via a new `GET /notifications?kind=p2p_send&limit=20` endpoint. Also shows a one-shot welcome banner when the BE flushes pending notifications after `/start`.
-- New hook `src/hooks/useNotifications.ts` (`useNotifications`) — wraps `useFetch` with auth headers from `useAppConfig()`. Returns `{ items, loading, error }`.
-- New type `NotificationItem` exported from `useNotifications.ts`.
-- `src/utils/chainConfig.ts` extended with `buildExplorerUrl(chainId, txHash)` and `chainName(chainId)` — use these; never inline chain IDs or explorer URLs.
-- `src/hooks/useAppData.tsx` extended with `UserProfile` type (`{ pendingFlushed: number }`), a `useFetch` for `GET /me`, and new selector `useUserProfile()`. `pendingFlushed` field is one-shot (BE clears after serving); cached only in component state, not localStorage.
-- `src/components/HomeTab.tsx` — added `RecentTransfers` section (after `YieldPositions`), `NotificationRow` component, and dismissable welcome flush banner. Logger scopes: `homeTab` and `notificationRow`.
-
-**Why:** Delivery is entirely via the Telegram bot; the Mini App is secondary surfacing for "who paid me" history. No SSE/push needed — simple `useFetch` on mount covers v1.
-
-**New conventions:**
-- Any future "things that happened *to* the user" feature should extend the `recipientNotifications` table on BE and add a new `kind` filter to `useNotifications` — not a new endpoint.
-- New client log metadata field: `count` (number of fetched notification items in a batch).
-- `buildExplorerUrl` / `chainName` live in `utils/chainConfig.ts` — extend there for new chains.
+### Recipient notifications — superseded by ActivityTab (2026-05-03)
+The earlier `RecentTransfers` block in `HomeTab` (backed by `useNotifications` → `GET /notifications` + welcome flush via `GET /me`) was **never wired on the BE** — those endpoints don't exist. The Activity tab (May 3) replaces that surface using the BE's actual `GET /transfers` (Ankr-backed). `useNotifications` is currently a stub returning `[]` and `RecentTransfers` is dead code; do not extend it. Use the ActivityTab pattern (`useTransferHistory`) for any future "who paid me" surfacing.
+- `buildExplorerUrl(chainId, txHash)` and `chainName(chainId)` in `utils/chainConfig.ts` are still the canonical helpers — extend there for new chains.
 
 ---
 
@@ -360,9 +384,9 @@ Source: hard-won fixes 2026-04-24. Read before touching `SignHandler.tsx`, `Yiel
 Manual sign uses the same SCA + chain + paymaster — if session-key UserOp fails (AA21, paymaster 404, prefund), manual fails identically and submits a second doomed UserOp. Render a full-screen error view instead: raw error text (selectable, copyable), diagnostics (`bundler:set|MISSING`, `paymaster:set|MISSING`, `to`, `value`, `dataLen`), Close button.
 
 ### Rule 2: `SigningRequestModal` is only for `autoSign: false`
-Modal uses `useSmartWallets().client.sendTransaction` (Privy EOA, no ZeroDev paymaster). Never a fallback for an auto-sign path expecting sponsorship. New handler split:
+Modal builds a sudo client via `createSudoClient(provider, eoa, ...)` (Privy EOA, no Pimlico paymaster). Never a fallback for an auto-sign path expecting sponsorship. Handler split:
 - `autoSign: true` → `createSessionKeyClient(blob, BUNDLER_URL, PAYMASTER_URL)`.
-- `autoSign: false` → `useSmartWallets()`.
+- `autoSign: false` → `createSudoClient(...)` (lazily built; see `utils/createSudoClient.ts`).
 
 ### Rule 3: Pimlico — one URL for bundler and paymaster
 Both `VITE_PIMLICO_BUNDLER_URL` and `VITE_PIMLICO_PAYMASTER_URL` can point at the same Pimlico per-chain endpoint (`https://api.pimlico.io/v2/<chainId>/rpc?apikey=…`). Pimlico routes `eth_sendUserOperation` vs `pm_getPaymasterStubData` internally. Keep them as two separate env vars for independent override capability.
@@ -401,5 +425,5 @@ Order in handler: check `findRecentBroadcast` first (reuse hash, skip send); els
 - Chain is driven by `VITE_CHAIN_ID` (defaults `43114` — Avalanche mainnet). `getChain()` in `utils/chainConfig.ts` resolves it to a viem chain object; **add new chains to that registry, not inline**. Multi-chain support already threads `chain` through all clients in `installSessionKey` / `createSessionKeyClient`.
 - Privy token refresh is the caller's responsibility — `usePrivyToken` fetches once on `authenticated` flip; long sessions may see stale tokens. Re-mount or call `getAccessToken()` if 401 bounces.
 - `useRequest` reads `requestId` once at mount. For chained swap steps, `SignHandler` uses `fetchNextRequest` directly — URL stays fixed.
-- `SmartWalletsProvider` must wrap `App`; `useSmartWallets()` throws otherwise.
+- Manual-sign userOps go through `createSudoClient(provider, eoa, ...)` — `useSmartWallets()` and `SmartWalletsProvider` are gone (removed 2026-05-03). FE+BE `aaConfig.ts` MUST stay in lockstep (entry point 0.7, Kernel V3.1, `index = 0n`).
 - No test runner — static stateless-routing regression guard deferred until vitest is added.

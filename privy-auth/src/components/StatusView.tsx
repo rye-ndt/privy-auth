@@ -5,8 +5,9 @@ import { HomeTab } from './HomeTab';
 import { ConfigsTab } from './ConfigsTab';
 import { DebugTab } from './DebugTab';
 import { PointsTab } from './PointsTab';
+import { ActivityTab } from './ActivityTab';
 
-type Tab = 'home' | 'points' | 'configs' | 'debug';
+type Tab = 'home' | 'activity' | 'points' | 'configs' | 'debug';
 
 export function StatusView({
   eoaAddress,
@@ -31,6 +32,7 @@ export function StatusView({
     <AppDataProvider backendUrl={backendUrl} privyToken={privyToken}>
       <div className="w-full min-h-dvh bg-[#0f0f1a] overflow-y-auto">
         {tab === 'home' && <HomeTab delegationState={delegationState} />}
+        {tab === 'activity' && <ActivityTab />}
         {tab === 'points' && <PointsTab />}
         {tab === 'configs' && (
           <ConfigsTab
@@ -49,18 +51,19 @@ export function StatusView({
 }
 
 const TABS: { id: Tab; label: string; Icon: React.FC<{ active: boolean }> }[] = [
-  { id: 'home',    label: 'Home',   Icon: HomeIcon },
-  { id: 'points',  label: 'Points', Icon: PointsIcon },
-  { id: 'configs', label: 'Config', Icon: ConfigIcon },
-  { id: 'debug',   label: 'Debug',  Icon: DebugIcon },
+  { id: 'home',     label: 'Home',     Icon: HomeIcon },
+  { id: 'activity', label: 'Activity', Icon: ActivityIcon },
+  { id: 'points',   label: 'Points',   Icon: PointsIcon },
+  { id: 'configs',  label: 'Config',   Icon: ConfigIcon },
+  { id: 'debug',    label: 'Debug',    Icon: DebugIcon },
 ];
 
 function TabDock({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
   return (
-    <div className="fixed bottom-0 left-0 right-0 flex justify-center pb-6 px-6 pointer-events-none z-40">
+    <div className="fixed bottom-0 left-0 right-0 flex justify-center pb-[max(env(safe-area-inset-bottom),1rem)] px-3 pointer-events-none z-40">
       <nav
         role="tablist"
-        className="flex items-center gap-1 bg-[#1a1a2e]/90 backdrop-blur-2xl border border-white/[0.08] rounded-2xl p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.5),0_0_0_1px_rgba(255,255,255,0.03)] pointer-events-auto"
+        className="flex items-center gap-0.5 w-full max-w-md bg-[#1a1a2e]/90 backdrop-blur-2xl border border-white/[0.08] rounded-2xl p-1 shadow-[0_8px_32px_rgba(0,0,0,0.5),0_0_0_1px_rgba(255,255,255,0.03)] pointer-events-auto"
       >
         {TABS.map(({ id, label, Icon }) => (
           <button
@@ -68,7 +71,7 @@ function TabDock({ active, onChange }: { active: Tab; onChange: (t: Tab) => void
             role="tab"
             aria-selected={active === id}
             onClick={() => onChange(id)}
-            className={`flex flex-col items-center gap-1 px-5 py-2.5 rounded-xl transition-all duration-200 ${
+            className={`flex-1 min-w-0 flex flex-col items-center gap-1 px-1 py-2 rounded-xl transition-all duration-200 ${
               active === id
                 ? 'bg-violet-500/20 text-violet-400'
                 : 'text-white/25 hover:text-white/60 hover:bg-white/[0.04]'
@@ -125,6 +128,14 @@ function PointsIcon({ active }: { active: boolean }) {
   return (
     <TabSvg active={active}>
       <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </TabSvg>
+  );
+}
+
+function ActivityIcon({ active }: { active: boolean }) {
+  return (
+    <TabSvg active={active}>
+      <polyline points="3 12 7 12 10 4 14 20 17 12 21 12" />
     </TabSvg>
   );
 }
