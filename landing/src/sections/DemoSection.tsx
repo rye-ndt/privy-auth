@@ -36,39 +36,41 @@ export function DemoSection() {
 
         {/* Right: Mock UI */}
         <div className="flex-1 w-full max-w-md">
-          <div className="rounded-3xl border border-white/10 bg-[#1c1c28] overflow-hidden shadow-2xl relative">
-            <div className="h-12 border-b border-white/5 flex items-center px-4 gap-3 bg-white/5">
-              <div className="w-3 h-3 rounded-full bg-red-500/80" />
-              <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
-              <div className="w-3 h-3 rounded-full bg-green-500/80" />
-              <span className="text-xs font-medium text-white/30 ml-4">Aegis Bot</span>
-            </div>
-            
-            <div className="p-6 space-y-6 h-[400px] flex flex-col justify-end bg-gradient-to-b from-transparent to-violet-900/10">
-              {/* Agent Message */}
-              <div className="flex flex-col gap-1 items-start">
-                <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-white/10 text-sm text-white/90 max-w-[85%]">
-                  You have $300 idle earning 0%. Want to earn 4.8% APY on Aave?
-                </div>
+          <div className="apple-intelligence-glow rounded-3xl">
+            <div className="rounded-3xl border border-white/5 bg-[#1c1c28] overflow-hidden shadow-2xl relative w-full h-full z-10">
+              <div className="h-12 border-b border-white/5 flex items-center px-4 gap-3 bg-white/5">
+                <div className="w-3 h-3 rounded-full bg-red-500/80" />
+                <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
+                <div className="w-3 h-3 rounded-full bg-green-500/80" />
+                <span className="text-xs font-medium text-white/30 ml-4">Aegis Bot</span>
               </div>
-
-              {/* User Message */}
-              <div className="flex flex-col gap-1 items-end">
-                <div className="px-4 py-3 rounded-2xl rounded-tr-sm bg-violet-600 text-sm text-white max-w-[85%]">
-                  Yes, deposit it.
-                </div>
-              </div>
-
-              {/* Agent UI Widget */}
-              <div className="flex flex-col gap-1 items-start">
-                <div className="p-4 rounded-2xl rounded-tl-sm bg-white/5 border border-white/10 max-w-[85%] w-full space-y-3 backdrop-blur-sm">
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-white/60">Deposit to Aave</span>
-                    <span className="font-medium">300 USDC</span>
+              
+              <div className="p-6 space-y-6 h-[400px] flex flex-col justify-end bg-gradient-to-b from-transparent to-violet-900/10 relative z-20">
+                {/* Agent Message */}
+                <div className="flex flex-col gap-1 items-start relative z-10">
+                  <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-white/10 text-sm text-white/90 max-w-[85%] backdrop-blur-md">
+                    You have $300 idle earning 0%. Want to earn 4.8% APY on Aave?
                   </div>
-                  <button className="w-full py-2.5 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 transition-all duration-200 text-sm font-medium text-center cursor-pointer">
-                    Tap to Confirm
-                  </button>
+                </div>
+
+                {/* User Message */}
+                <div className="flex flex-col gap-1 items-end relative z-10">
+                  <div className="px-4 py-3 rounded-2xl rounded-tr-sm bg-violet-600 text-sm text-white max-w-[85%] shadow-lg shadow-violet-500/20">
+                    Yes, deposit it.
+                  </div>
+                </div>
+
+                {/* Agent UI Widget */}
+                <div className="flex flex-col gap-1 items-start relative z-10">
+                  <div className="p-4 rounded-2xl rounded-tl-sm bg-white/5 border border-white/10 max-w-[85%] w-full space-y-3 backdrop-blur-xl">
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-white/60">Deposit to Aave</span>
+                      <span className="font-medium">300 USDC</span>
+                    </div>
+                    <button className="w-full py-2.5 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 transition-all duration-200 text-sm font-medium text-center cursor-pointer border border-white/5">
+                      Tap to Confirm
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

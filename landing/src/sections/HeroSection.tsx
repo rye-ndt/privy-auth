@@ -19,7 +19,7 @@ export function HeroSection() {
         </h1>
         
         <p className="text-xl md:text-2xl text-white/60 mb-10 max-w-3xl font-light leading-relaxed">
-          Aegis turns Telegram into a safe, smart on-chain account. Send money to any <span className="text-violet-400 font-medium">@handle</span> and let an AI agent auto-compound your yield. <br/> <strong className="text-white/90 font-semibold mt-2 block">You don't need to know DeFi to work with DeFi.</strong>
+          Tapping into Telegram's 900M users with invisible account abstraction and agentic DeFi. <br/> <strong className="text-white/90 font-semibold mt-2 block">We turn any chat into a fully-functional, non-custodial smart account.</strong>
         </p>
 
         <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">

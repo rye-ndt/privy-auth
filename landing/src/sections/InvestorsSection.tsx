@@ -5,7 +5,7 @@ export function InvestorsSection() {
     <section className="py-24 px-6 border-y border-white/10 bg-[#0a0a14]">
       <div className="max-w-5xl mx-auto">
         <div className="flex flex-col md:flex-row items-baseline justify-between mb-12 border-b border-white/10 pb-6">
-          <h2 className="text-3xl font-bold tracking-tight text-white/90">For Investors & Partners</h2>
+          <h2 className="text-3xl font-bold tracking-tight text-white/90">Join the Next Wave of DeFi</h2>
           <span className="text-sm font-medium text-white/40 uppercase tracking-widest mt-4 md:mt-0">Executive Summary</span>
         </div>
 
@@ -56,21 +56,10 @@ export function InvestorsSection() {
             </div>
 
             <div>
-              <h4 className="text-lg font-semibold text-white mb-4">Roadmap Teaser</h4>
-              <ul className="space-y-3 text-sm text-white/70">
-                <li className="flex items-center gap-3">
-                  <div className="w-1.5 h-1.5 rounded-full bg-violet-500" />
-                  Multi-chain expansion (Base, Arbitrum, Polygon)
-                </li>
-                <li className="flex items-center gap-3">
-                  <div className="w-1.5 h-1.5 rounded-full bg-violet-500" />
-                  Third-party Capabilities marketplace
-                </li>
-                <li className="flex items-center gap-3">
-                  <div className="w-1.5 h-1.5 rounded-full bg-violet-500" />
-                  Mobile Mini-App UI polish & onboarding
-                </li>
-              </ul>
+              <h4 className="text-lg font-semibold text-white mb-4">The Ask & Current Status</h4>
+              <p className="leading-relaxed text-sm text-white/70">
+                Aegis is currently in closed beta. We are raising our next round to expand the engineering team, accelerate the rollout of our third-party Capabilities marketplace, and scale our infrastructure to Base, Arbitrum, and Polygon.
+              </p>
             </div>
 
             <button className="flex items-center justify-between w-full p-4 rounded-xl bg-white/10 hover:bg-white/15 active:scale-[0.98] transition-all duration-200 border border-white/10 text-white font-medium cursor-pointer">

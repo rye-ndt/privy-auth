@@ -34,3 +34,36 @@ body {
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
 }
+
+@keyframes apple-halo {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.apple-intelligence-glow {
+  position: relative;
+  z-index: 1; /* create stacking context */
+}
+
+.apple-intelligence-glow::before,
+.apple-intelligence-glow::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 26px; /* slightly larger than the inner 24px (rounded-3xl) */
+  background: linear-gradient(115deg, #a78bfa, #3b82f6, #c084fc, #a78bfa);
+  background-size: 300% 300%;
+  animation: apple-halo 4s linear infinite;
+  pointer-events: none;
+}
+
+.apple-intelligence-glow::before {
+  z-index: -1; /* sharp border */
+}
+
+.apple-intelligence-glow::after {
+  z-index: -2; /* blurred halo */
+  filter: blur(24px);
+  opacity: 0.8;
+}
