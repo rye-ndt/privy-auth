@@ -14,6 +14,7 @@ import type { KernelAccountClient } from '@zerodev/sdk';
 import { createLogger } from './logger';
 import {
   getChainById,
+  getChainId,
   getRpcUrlById,
   getBundlerUrl,
   getPaymasterUrl,
@@ -122,10 +123,15 @@ export async function installSessionKey(
   const chain = getChainById(chainId);
   const rpcUrl = getRpcUrlById(chainId);
 
-  // 1. Build a viem WalletClient backed by the Privy embedded wallet provider
+  // 1. Build a viem WalletClient backed by the Privy embedded wallet provider.
+  //    The owner only signs userOp HASHES via personal_sign — chain-agnostic —
+  //    so we declare the wallet on the home chain (always allow-listed by
+  //    Privy) while the kernel/public clients live on the target chain. This
+  //    is what unblocks BSC userOps when Privy doesn't list BSC as supported.
+  const signerChain = getChainById(getChainId());
   const walletClient = createWalletClient({
     account: signerAddress,
-    chain,
+    chain: signerChain,
     transport: custom(provider as Parameters<typeof custom>[0]),
   });
 

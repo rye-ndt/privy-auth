@@ -9,6 +9,7 @@ import type { KernelAccountClient } from '@zerodev/sdk';
 import { AA_CONFIG, getAaEntryPoint } from './aaConfig';
 import {
   getChainById,
+  getChainId,
   getRpcUrlById,
   getBundlerUrl,
   getPaymasterUrl,
@@ -32,9 +33,15 @@ export async function createSudoClient(
   const publicClient = createPublicClient({ chain, transport: http(rpcUrl) });
   const entryPoint = getAaEntryPoint();
 
+  // Privy's embedded wallet doesn't allow-list every chain (e.g. BSC). The
+  // owner only ever signs userOp HASHES via personal_sign, which is
+  // chain-agnostic — the chain id is baked into the hash, not the RPC call.
+  // So we declare the wallet client on the home chain (always Privy-supported)
+  // while the kernel/public/bundler clients live on the target chain.
+  const signerChain = getChainById(getChainId());
   const walletClient = createWalletClient({
     account: signerAddress,
-    chain,
+    chain: signerChain,
     transport: custom(provider as Parameters<typeof custom>[0]),
   });
   const ownerSigner = await toOwner({ owner: walletClient });

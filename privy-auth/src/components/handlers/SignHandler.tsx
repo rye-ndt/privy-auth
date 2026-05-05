@@ -229,6 +229,10 @@ export function SignHandler({
           rejected: true,
           errorCode: interpreted.code,
           errorMessage: interpreted.friendly,
+          // Raw viem error so BE logs the actual revert reason (e.g. BAL#402)
+          // instead of just `errorCode: 'unknown'`. Truncated to keep the BE
+          // schema cap; never displayed to the user.
+          errorRaw: msg.slice(0, 1024),
         }).catch((e) => log.debug('postResponse(error) failed', { err: String(e) }));
         setAutoSignError(interpreted);
         return;

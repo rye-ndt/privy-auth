@@ -83,6 +83,10 @@ export interface SignResponse extends BaseResponse {
   // to drive recovery flows (e.g. /buy nudge on insufficient_token_balance).
   errorCode?: string;
   errorMessage?: string;
+  // Raw underlying error (viem revert text, stack tail). Sent for BE logs only —
+  // never surfaced to the user. errorMessage is the friendly version BE may
+  // re-display.
+  errorRaw?: string;
 }
 
 interface DelegationRecordDto {
