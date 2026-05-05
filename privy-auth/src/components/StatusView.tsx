@@ -3,11 +3,10 @@ import type { DelegationState } from '../hooks/useDelegatedKey';
 import { AppDataProvider } from '../hooks/useAppData';
 import { HomeTab } from './HomeTab';
 import { ConfigsTab } from './ConfigsTab';
-import { DebugTab } from './DebugTab';
 import { PointsTab } from './PointsTab';
 import { ActivityTab } from './ActivityTab';
 
-type Tab = 'home' | 'activity' | 'points' | 'configs' | 'debug';
+type Tab = 'home' | 'activity' | 'points' | 'configs';
 
 export function StatusView({
   eoaAddress,
@@ -42,7 +41,6 @@ export function StatusView({
             removeKey={removeKey}
           />
         )}
-        {tab === 'debug' && <DebugTab />}
 
         <TabDock active={tab} onChange={setTab} />
       </div>
@@ -55,7 +53,6 @@ const TABS: { id: Tab; label: string; Icon: React.FC<{ active: boolean }> }[] = 
   { id: 'activity', label: 'Activity', Icon: ActivityIcon },
   { id: 'points',   label: 'Points',   Icon: PointsIcon },
   { id: 'configs',  label: 'Config',   Icon: ConfigIcon },
-  { id: 'debug',    label: 'Debug',    Icon: DebugIcon },
 ];
 
 function TabDock({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
@@ -111,15 +108,6 @@ function ConfigIcon({ active }: { active: boolean }) {
     <TabSvg active={active}>
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06-.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-    </TabSvg>
-  );
-}
-
-function DebugIcon({ active }: { active: boolean }) {
-  return (
-    <TabSvg active={active}>
-      <polyline points="4 17 10 11 4 5" />
-      <line x1="12" y1="19" x2="20" y2="19" />
     </TabSvg>
   );
 }

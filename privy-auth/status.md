@@ -1,5 +1,17 @@
 # Privy Auth Mini-App — Status Log
 
+## DebugTab removal — 2026-05-05
+
+**What was done:**
+- Deleted `components/DebugTab.tsx` and `hooks/useDebugEntries.ts` (the `console.*` interceptor).
+- `StatusView.tsx`: dropped the `'debug'` tab from the `Tab` union, removed the import / mount / dock entry / `DebugIcon`. Dock is now 4 tabs.
+
+**Why:**
+- The in-app console viewer was developer-only surface area shipping to mini-app users. Logs are still observable via the host browser console; the toast surface for `warn`/`error` is unchanged.
+
+**Kept (still in use elsewhere):**
+- `utils/logger.ts` — `createLogger`, `setLogLevel`/`getLogLevel`, the `[AEGIS:scope]` prefix, and `window.__aegisLog` runtime gate. Untouched.
+
 ## TabDock overflow fix (Telegram narrow viewport) — 2026-05-04
 
 **What was done:**
@@ -113,11 +125,10 @@ src/
 ├── components/
 │   ├── TelegramAutoLogin.tsx      # Silent loginWithTelegram on TMA mount
 │   ├── ApprovalOnboarding.tsx     # Spending-limit grant UI (aegis_guard)
-│   ├── StatusView.tsx             # Tabbed home (TabDock: home/points/configs/debug)
+│   ├── StatusView.tsx             # Tabbed home (TabDock: home/activity/points/configs)
 │   ├── HomeTab.tsx                # Portfolio + delegation status + YieldPositions
 │   ├── PointsTab.tsx              # Loyalty balance, history, leaderboard
 │   ├── ConfigsTab.tsx             # Wallet/agent addresses, permissions, disconnect
-│   ├── DebugTab.tsx               # Console viewer + level toggle
 │   ├── SigningRequestModal.tsx    # Manual sign fallback
 │   ├── YieldPositions.tsx         # Inline yield section in HomeTab
 │   ├── atomics/                   # icons.tsx, spinner.tsx, FullScreen.tsx
@@ -130,7 +141,6 @@ src/
 │   ├── useFetch.ts                # Generic authed-GET hook
 │   ├── useAppData.tsx             # AppDataProvider — portfolio/grants/yield/config
 │   ├── useLoyalty.ts              # useLoyaltyBalance / History / Leaderboard
-│   ├── useDebugEntries.ts         # console interceptor (filters [AEGIS:)
 │   └── useDelegatedKey.ts         # Session-keypair state machine
 ├── types/miniAppRequest.types.ts  # Single source of truth for DTOs
 └── utils/
@@ -459,3 +469,18 @@ There is no in-session recovery. The BE corrects design (see BE plan P2.5) emits
 - Per-chain client caches must use `Map<number, KernelAccountClient>` (or `SessionClient`) — never a single ref. Drop a chain's entry on `'next swap step'` invalidation, not all entries.
 - All sign-related logs include `chainId`. Same for `installSessionKey` / `createSessionKeyClient` debug.
 - `aaConfig.ts` (FE) ↔ `aaConfig.ts` (BE) byte-identical — chain-agnostic, do not change for this feature.
+
+---
+
+## 2026-05-05 — Telegram CloudStorage: timeouts + transparent chunking
+
+**What changed:** `utils/telegramStorage.ts` now wraps every CloudStorage callback in a 15s timeout (`withTimeout`) and transparently chunks values larger than `MAX_CHUNK_CHARS = 3800` across `${key}_c${i}` slots, with a `__aegis_chunks_v1:<N>` manifest at the main key. Read/write/remove are unchanged in shape — callers (`useDelegatedKey`) need no edits.
+
+**Why:** Multi-chain delegation made the encrypted `delegated_key` payload exceed Telegram's 4096-byte per-value cap. Telegram silently drops the `setItem` callback in that case, so `persistAll()` (`useDelegatedKey.ts:109`) hung forever and setup got stuck on the "Storing session key…" step. Alternatives considered: (a) compressing the payload — fragile, still bounded; (b) moving storage server-side — rejected, would defeat the FE-owned key custody model. Chunking is local, reversible, and the 1024-key Telegram limit gives plenty of headroom.
+
+**Conventions introduced:**
+- New module logger scope: `telegramStorage`. Emits `cloudstorage-timeout` (warn — surfaces as toast since hangs are user-visible-worthy), `chunked-read` / `chunked-write` (debug), `chunked-read-missing` (warn — torn write). Metadata fields: `op`, `key`, `chunks`, `totalChars`, `missingIndex`, `expected`, `timeoutMs`.
+- Write order: chunks first, **then** manifest. A torn write leaves the main key holding the prior (or no) manifest — never a manifest pointing at missing chunks.
+- Every set first calls `clearChunksIfAny(key)` to evict stale chunks from a previous larger value, so shrinking rewrites can't be misread by a later chunked read.
+- Manifest sentinel `__aegis_chunks_v1:` is reserved — do not write user data starting with this prefix to any CloudStorage key. Bumping the format requires a new prefix (`v2:`) and a read-side fallback for both.
+- Backward compatible with pre-chunking single-value entries (no manifest → returned as-is).

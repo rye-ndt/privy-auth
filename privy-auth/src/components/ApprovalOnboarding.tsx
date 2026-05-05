@@ -65,8 +65,14 @@ export function ApprovalOnboarding({
   );
   const [paramsByChain, setParamsByChain] = React.useState<PerChainParams | null>(null);
   // Flat view used by the rendered list — concatenates all chains' rows.
+  // Filter out malformed rows (no symbol/address) so the UI never shows a blank
+  // token chip with a nonsensical amount; same filter is enforced at POST time.
   const approvalParams = paramsByChain
-    ? targetChainIds.flatMap((cid) => paramsByChain[cid] ?? [])
+    ? targetChainIds.flatMap((cid) =>
+        (paramsByChain[cid] ?? []).filter(
+          (t) => !!t.tokenAddress && !!t.tokenSymbol && t.tokenSymbol.length > 0,
+        ),
+      )
     : null;
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [approveClicked, setApproveClicked] = React.useState(false);
@@ -116,11 +122,25 @@ export function ApprovalOnboarding({
       try {
         for (const cid of targetChainIds) {
           const tokens = paramsByChain[cid] ?? [];
-          if (tokens.length === 0) {
+          // Drop malformed rows (no symbol or no address) — the BE zod schema at
+          // POST /delegation/grant requires tokenSymbol.min(1) and would 400 the
+          // whole batch. Filtering here keeps a single bad row from killing the
+          // chain's entire grant.
+          const validTokens = tokens.filter(
+            (t) => !!t.tokenAddress && !!t.tokenSymbol && t.tokenSymbol.length > 0,
+          );
+          if (validTokens.length !== tokens.length) {
+            log.warn('grant-dropped-malformed-rows', {
+              chainId: cid,
+              dropped: tokens.length - validTokens.length,
+              kept: validTokens.length,
+            });
+          }
+          if (validTokens.length === 0) {
             log.debug('skip-empty', { chainId: cid });
             continue;
           }
-          const delegations = tokens.map((p) => ({
+          const delegations = validTokens.map((p) => ({
             tokenAddress: p.tokenAddress,
             tokenSymbol: p.tokenSymbol,
             tokenDecimals: p.tokenDecimals,
