@@ -1,5 +1,49 @@
 # Privy Auth Mini-App — Status Log
 
+## Onramp cancellation + send dedup rekey by requestId — 2026-05-05
+
+**What was done:**
+- `OnrampHandler.tsx`: Privy's `fundWallet` resolves whenever the funding
+  modal closes (including on cancel), so the previous `await fundWallet → setStatus('done')`
+  flow showed "Payment submitted" even when the user cancelled Stripe/Apple
+  Pay. Now subscribes to `useFundWallet({ onUserExited })`; if the user exits
+  with no `fundingMethod` (or zero balance change) we record an
+  `exitedWithoutPayingRef` flag, then on the awaited `fundResult` only
+  treat `status: 'submitted' | 'confirmed'` as success. Otherwise render a
+  new `'cancelled'` screen ("Payment cancelled — no charge was made") with
+  a Try-again button.
+- `recentBroadcasts.ts`: rekeyed dedup from `(to, value, data)` to
+  `requestId`. The legacy payload-key collided with legitimate repeat
+  sends (e.g. `/send 0.01 USDC` twice — second silently reused first hash,
+  reported success without broadcasting). LS key bumped to
+  `aegis.recentBroadcasts.v2` to drop stale v1 entries on first load.
+- `SignHandler.tsx`: updated to call `findRecentBroadcast(requestId)` /
+  `trackInFlightBroadcast(requestId, send)`. Behaviour for a single
+  request is unchanged (StrictMode double-mount + effect re-fire still
+  coalesce); cross-requestId reuse is the BE's responsibility now.
+
+**Why over alternatives:**
+- `onUserExited` is the only authoritative "user backed out" signal Privy
+  exposes; it fires before `fundWallet` resolves. Reading the resolved
+  `FundResult.status` alone wasn't enough because some Privy flows resolve
+  with no status (older shape) on plain modal close.
+- Pure requestId-keyed dedup makes the FE oblivious to "is this the same
+  payload as last time" — which is correct: the BE's signing-request cache
+  already prevents duplicate resolution per requestId, and the new
+  server-side `SIGNING_REQUEST_DUPLICATE_HASH` guard catches the rarer
+  BE-retry-with-fresh-requestId case that v1 was originally written for.
+
+**New convention:**
+- Mini-app handlers that wrap a Privy modal (`fundWallet`, etc.) must
+  treat the awaited promise as ambiguous and gate the success branch on
+  an explicit signal (`onUserExited` ref + `FundResult.status` check).
+  Don't equate "promise resolved" with "user paid".
+- LocalStorage cache keys carry an explicit version suffix
+  (`aegis.<feature>.v<N>`). Bump the suffix when the value shape changes
+  so old entries are silently dropped instead of poisoning the new logic.
+
+
+
 ## DebugTab removal — 2026-05-05
 
 **What was done:**

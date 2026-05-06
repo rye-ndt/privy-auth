@@ -174,21 +174,21 @@ export function SignHandler({
         return;
       }
 
-      // Payload-level dedupe: if this exact (to, value, data) was already
-      // broadcast from this device within the TTL, do NOT re-broadcast.
-      // Reason: when the BE fails to ack a successful tx and re-issues the
-      // request under a fresh requestId, we'd otherwise drain the user's
-      // balance by signing the same operation again. The chain is the source
-      // of truth; reuse the cached hash and proceed to ack/close.
-      const dedupeHit = findRecentBroadcast(
-        currentRequest.to,
-        currentRequest.value,
-        currentRequest.data,
-      );
+      // RequestId-level dedupe: if THIS signing requestId was already
+      // broadcast from this device, reuse the cached hash. Catches
+      // StrictMode double-mount and effect re-fire on the same request.
+      //
+      // We deliberately do NOT dedupe across different requestIds, even
+      // when the calldata is identical: that collided with legitimate
+      // user-initiated repeats (e.g. /send 0.01 USDC twice in a row would
+      // silently reuse the first hash and report fake success). The BE
+      // adds a server-side freshness/uniqueness guard for the rarer case
+      // of a BE-side retry under a fresh requestId.
+      const dedupeHit = findRecentBroadcast(currentRequest.requestId);
       let hash: `0x${string}`;
       if (dedupeHit) {
         log.warn(
-          'duplicate-payload — reusing prior broadcast instead of re-sending',
+          'duplicate-requestId — reusing prior broadcast instead of re-sending',
           { requestId: currentRequest.requestId, hash: dedupeHit.hash, ageMs: Date.now() - dedupeHit.ts },
           { toast: false },
         );
@@ -196,14 +196,11 @@ export function SignHandler({
       } else {
       try {
         // trackInFlightBroadcast coalesces concurrent sends of the same
-        // (to, value, data) within this tab. Prevents a second userOp from
-        // being submitted when StrictMode/effect-rerun/BE-re-emit fires while
-        // the first send is still in flight — without this, both attempts
-        // race past findRecentBroadcast (which only sees *completed* sends).
+        // requestId within this tab. Prevents a second userOp from being
+        // submitted when StrictMode/effect-rerun fires while the first
+        // send is still in flight.
         hash = await trackInFlightBroadcast(
-          currentRequest.to,
-          currentRequest.value,
-          currentRequest.data,
+          currentRequest.requestId,
           () => sessionClient!.sendTransaction({
             to: currentRequest.to as `0x${string}`,
             value: BigInt(currentRequest.value),

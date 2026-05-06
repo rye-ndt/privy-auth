@@ -1,14 +1,24 @@
 import { createLogger } from './logger';
 
 const log = createLogger('recentBroadcasts');
-const LS_KEY = 'aegis.recentBroadcasts.v1';
+const LS_KEY = 'aegis.recentBroadcasts.v2';
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 
 type Entry = { hash: string; ts: number };
 type Store = Record<string, Entry>;
 
-function payloadKey(to: string, value: string, data: string): string {
-  return `${to.toLowerCase()}|${BigInt(value).toString()}|${data.toLowerCase()}`;
+// Dedupe is keyed by the BE-assigned signing requestId, NOT by calldata.
+//
+// History: v1 keyed by `(to, value, data)` to defend against a BE retry that
+// re-issued an identical sign request under a fresh requestId. That worked
+// for the retry case but collided with legitimate user-initiated repeats —
+// e.g. /send 0.01 USDC twice in a row would silently reuse the first hash
+// and report success a second time without broadcasting. The BE-side
+// signing-request cache already prevents double-resolution per requestId,
+// so requestId-keyed dedupe is sufficient here. The BE adds a server-side
+// freshness/uniqueness guard on POST /response for the BE-retry case.
+function requestIdKey(requestId: string): string {
+  return requestId;
 }
 
 function load(): Store {
@@ -36,56 +46,46 @@ function prune(store: Store, ttlMs: number): Store {
 }
 
 export function findRecentBroadcast(
-  to: string,
-  value: string,
-  data: string,
+  requestId: string,
   ttlMs: number = DEFAULT_TTL_MS,
 ): Entry | null {
   const store = prune(load(), ttlMs);
-  const hit = store[payloadKey(to, value, data)] ?? null;
-  if (hit) log.debug('payload-dedupe-hit', { hash: hit.hash, ageMs: Date.now() - hit.ts });
+  const hit = store[requestIdKey(requestId)] ?? null;
+  if (hit) log.debug('requestId-dedupe-hit', { requestId, hash: hit.hash, ageMs: Date.now() - hit.ts });
   return hit;
 }
 
 export function recordBroadcast(
-  to: string,
-  value: string,
-  data: string,
+  requestId: string,
   hash: string,
   ttlMs: number = DEFAULT_TTL_MS,
 ) {
   const store = prune(load(), ttlMs);
-  store[payloadKey(to, value, data)] = { hash, ts: Date.now() };
+  store[requestIdKey(requestId)] = { hash, ts: Date.now() };
   save(store);
-  log.debug('payload-recorded', { hash });
+  log.debug('requestId-recorded', { requestId, hash });
 }
 
-// In-flight broadcasts: serializes concurrent sends of the same payload within
-// this tab. localStorage dedupe (above) only catches *completed* broadcasts —
-// it can't help when two attempts start in parallel (StrictMode double-mount,
-// BE re-emitting the same sign_calldata before /response is acked, effect
-// re-fire on swap). Without this, both attempts race past findRecentBroadcast,
-// both hit the bundler; the first mines + drains the wallet; the second's gas
-// estimation reverts with "ERC20: transfer amount exceeds balance" — which the
-// user sees as a spurious error toast even though the on-chain tx succeeded.
+// In-flight broadcasts: serializes concurrent sends of the same requestId
+// within this tab. Catches StrictMode double-mount and effect re-fire while
+// a send is still in flight. localStorage dedupe (above) only catches
+// *completed* broadcasts; this catches the race in between.
 const inFlight = new Map<string, Promise<string>>();
 
 export function trackInFlightBroadcast(
-  to: string,
-  value: string,
-  data: string,
+  requestId: string,
   send: () => Promise<`0x${string}`>,
 ): Promise<`0x${string}`> {
-  const key = payloadKey(to, value, data);
+  const key = requestIdKey(requestId);
   const existing = inFlight.get(key);
   if (existing) {
-    log.debug('payload-inflight-coalesced', { key });
+    log.debug('requestId-inflight-coalesced', { requestId });
     return existing as Promise<`0x${string}`>;
   }
   const p: Promise<`0x${string}`> = (async () => {
     try {
       const hash = await send();
-      recordBroadcast(to, value, data, hash);
+      recordBroadcast(requestId, hash);
       return hash;
     } finally {
       inFlight.delete(key);
