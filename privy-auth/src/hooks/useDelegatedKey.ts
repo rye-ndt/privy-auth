@@ -261,7 +261,7 @@ export function useDelegatedKey(options: {
   // Existing-user BSC enablement is handled lazily by BscDelegationModal when a
   // BSC SignRequest arrives — that's the contract documented in FE plan P2.3
   // and BE plan §"Cross-chain delegation". Auto-prompting on app load would
-  // surprise the user with a Privy popup outside any explicit /stock flow.
+  // surprise the user with a Privy popup outside any explicit cross-chain flow.
   const start = React.useCallback(() => {
     if (!smartAccountAddress || !privyDid) return;
     (async () => {
@@ -294,7 +294,7 @@ export function useDelegatedKey(options: {
     })();
   }, [smartAccountAddress, privyDid, tryRestore, buildRecord, createAndStore, chainIdsToInstall]);
 
-  // Add a chain to an already-installed keypair (e.g. existing user opens /stock).
+  // Add a chain to an already-installed keypair.
   const installOnChain = React.useCallback((chainId: number) => {
     if (!keypairRef.current) {
       log.warn('installOnChain called before keypair is loaded', { chainId });

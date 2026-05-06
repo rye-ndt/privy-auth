@@ -78,13 +78,7 @@ export function getOnboardingChainIds(): number[] {
     const ids = raw.split(',').map((s) => Number(s.trim())).filter((n) => Number.isFinite(n));
     if (ids.length > 0) return ids;
   }
-  // Default: home + BSC (for Aster tokenized stocks), but only if BSC's
-  // bundler URL is actually configured in this build. Otherwise BSC userOps
-  // would fail at install time and break onboarding.
-  const home = getChainId();
-  const out = [home];
-  if (home !== 56 && CHAIN_REGISTRY[56]?.bundlerUrl) out.push(56);
-  return out;
+  return [getChainId()];
 }
 
 export function buildExplorerUrl(chainId: number, txHash: string): string {

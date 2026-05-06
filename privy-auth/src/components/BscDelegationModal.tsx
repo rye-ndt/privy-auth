@@ -16,10 +16,10 @@ interface Props {
 }
 
 /**
- * Existing-user top-up flow: a SignRequest arrived for a chain (typically BSC
- * for /stock) where the session key isn't yet installed. We render this modal
- * before SignHandler's auto-sign effect runs so the user signs one Privy popup
- * to enable the new chain, then the trade proceeds.
+ * Existing-user top-up flow: a SignRequest arrived for a chain where the
+ * session key isn't yet installed. We render this modal before SignHandler's
+ * auto-sign effect runs so the user signs one Privy popup to enable the new
+ * chain, then the trade proceeds.
  */
 export function BscDelegationModal({
   chainId,

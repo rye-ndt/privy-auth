@@ -73,8 +73,8 @@ export function SignHandler({
   const [done, setDone] = React.useState(false);
   const [autoSignError, setAutoSignError] = React.useState<InterpretedError | null>(null);
   const autoSignAttemptedRef = React.useRef(false);
-  // Cache session clients per chain so cross-chain step lists (e.g. /stock buy
-  // bridges Avax → BSC) don't re-pay the deserialize cost on every chain switch.
+  // Cache session clients per chain so cross-chain step lists don't re-pay
+  // the deserialize cost on every chain switch.
   const sessionClientByChainRef = React.useRef<Map<number, SessionClient>>(new Map());
 
   const getSessionClient = React.useCallback(async (chainId: number): Promise<SessionClient> => {
