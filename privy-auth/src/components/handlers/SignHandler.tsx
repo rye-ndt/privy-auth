@@ -15,7 +15,9 @@ import { BscDelegationModal } from '../BscDelegationModal';
 import { createLogger } from '../../utils/logger';
 import { interpretSignError, type InterpretedError } from '../../utils/interpretSignError';
 import { findRecentBroadcast, trackInFlightBroadcast } from '../../utils/recentBroadcasts';
-import { getChainId, getPaymasterUrl } from '../../utils/chainConfig';
+import { getChainId, getPaymasterUrl, getBundlerUrl, getRpcUrlById, getSponsorshipPolicyId } from '../../utils/chainConfig';
+import { extractViemErrorContext, buildErrorRaw } from '../../utils/extractViemErrorContext';
+import { getLastRpc, summarizeLastRpc } from '../../utils/rpcTrace';
 
 const log = createLogger('SignHandler');
 
@@ -148,15 +150,41 @@ export function SignHandler({
 
     autoSignAttemptedRef.current = true;
     const reqChainId = currentRequest.chainId ?? getChainId();
+    const startMs = Date.now();
+    // Snapshot of network/visibility/Telegram-platform context at the start
+    // of the userOp send. Re-read on failure so we can tell whether the user
+    // went offline or backgrounded the WebApp between dispatch and error.
+    const tgWebApp = (window as unknown as {
+      Telegram?: { WebApp?: { platform?: string; version?: string } };
+    }).Telegram?.WebApp;
+    const envSnapshot = () => ({
+      online: typeof navigator !== 'undefined' ? navigator.onLine : undefined,
+      visibility: typeof document !== 'undefined' ? document.visibilityState : undefined,
+      tgPlatform: tgWebApp?.platform,
+      tgVersion: tgWebApp?.version,
+    });
     log.info('step', { step: 'started', requestId: currentRequest.requestId, chainId: reqChainId });
+    const safeHostOf = (url: string | undefined) => {
+      if (!url) return undefined;
+      try {
+        const u = new URL(url);
+        const seg = u.pathname.split('/').filter(Boolean)[0] ?? '';
+        return seg ? `${u.host}/${seg}` : u.host;
+      } catch { return undefined; }
+    };
+    const tryUrl = (fn: () => string | undefined) => { try { return fn(); } catch { return undefined; } };
     log.debug('autoSign start', {
       requestId: currentRequest.requestId,
       chainId: reqChainId,
       blobLen: serializedBlob.length,
-      hasPaymaster: !!getPaymasterUrl(reqChainId),
+      bundlerHost: safeHostOf(tryUrl(() => getBundlerUrl(reqChainId))),
+      paymasterHost: safeHostOf(getPaymasterUrl(reqChainId)),
+      rpcHost: safeHostOf(tryUrl(() => getRpcUrlById(reqChainId))),
+      hasPolicyId: !!getSponsorshipPolicyId(reqChainId),
       to: currentRequest.to,
       value: currentRequest.value,
       dataLen: currentRequest.data.length,
+      ...envSnapshot(),
     });
 
     (async () => {
@@ -212,13 +240,50 @@ export function SignHandler({
       } catch (err) {
         const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
         const interpreted = interpretSignError(err);
-        log.error('sendTransaction failed', { requestId: currentRequest.requestId, err: msg }, { toast: false });
+        const viemCtx = extractViemErrorContext(err, reqChainId);
+        const lastRpc = getLastRpc(reqChainId);
+        const lastRpcSummary = summarizeLastRpc(lastRpc);
+        log.error(
+          'sendTransaction failed',
+          {
+            requestId: currentRequest.requestId,
+            chainId: reqChainId,
+            durationMs: Date.now() - startMs,
+            sca: sessionClient?.account?.address,
+            // The exact JSON-RPC method that was last in flight when the error
+            // fired — narrows "userOp send failed" down to one of:
+            //   bundler:eth_sendUserOperation / eth_estimateUserOperationGas
+            //   paymaster:pm_getPaymasterStubData / pm_getPaymasterData
+            //   rpc:eth_call (during userOp prep)
+            // Instrumented in `utils/rpcTrace.ts`.
+            lastRpcKind: lastRpc?.kind,
+            lastRpcMethod: lastRpc?.method,
+            lastRpcHost: lastRpc?.host,
+            lastRpcStatus: lastRpc?.status,
+            lastRpcDurationMs:
+              lastRpc ? (lastRpc.finishedAt ?? Date.now()) - lastRpc.startedAt : undefined,
+            lastRpcInFlight: lastRpc ? lastRpc.finishedAt === undefined : undefined,
+            lastRpcErrorBody: lastRpc?.errorBody,
+            kind: viemCtx.kind,
+            endpoint: viemCtx.endpoint,
+            status: viemCtx.status,
+            body: viemCtx.body,
+            shortMessage: viemCtx.shortMessage,
+            details: viemCtx.details,
+            causeChain: viemCtx.causeChain,
+            ...envSnapshot(),
+            err: msg,
+          },
+          { toast: false },
+        );
         log.warn(interpreted.friendly, { requestId: currentRequest.requestId });
         if (err instanceof Error && err.stack) log.debug('stack', { stack: err.stack });
         // Tell the BE the request failed AND why. The BE keys off `errorCode`
         // to drive recovery flows (e.g. /buy nudge on insufficient_token_balance);
         // without this it would just timeout the signing request and the user
-        // would see no contextual help in chat.
+        // would see no contextual help in chat. `errorRaw` is enriched with the
+        // viem cause-chain context (kind/status/endpoint/body) so the BE log
+        // shows transport-vs-evm root cause without re-parsing freeform text.
         postResponse(backendUrl, {
           requestId: currentRequest.requestId,
           requestType: 'sign',
@@ -226,10 +291,12 @@ export function SignHandler({
           rejected: true,
           errorCode: interpreted.code,
           errorMessage: interpreted.friendly,
-          // Raw viem error so BE logs the actual revert reason (e.g. BAL#402)
-          // instead of just `errorCode: 'unknown'`. Truncated to keep the BE
-          // schema cap; never displayed to the user.
-          errorRaw: msg.slice(0, 1024),
+          errorRaw: buildErrorRaw(err, viemCtx, {
+            durationMs: Date.now() - startMs,
+            sca: sessionClient?.account?.address,
+            lastRpc: lastRpcSummary,
+            ...envSnapshot(),
+          }),
         }).catch((e) => log.debug('postResponse(error) failed', { err: String(e) }));
         setAutoSignError(interpreted);
         return;

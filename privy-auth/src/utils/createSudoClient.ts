@@ -16,6 +16,7 @@ import {
   getSponsorshipPolicyId,
 } from './chainConfig';
 import { createLogger } from './logger';
+import { instrumentTransport } from './rpcTrace';
 
 const log = createLogger('createSudoClient');
 
@@ -30,7 +31,10 @@ export async function createSudoClient(
   const paymasterUrl = getPaymasterUrl(chainId);
   const sponsorshipPolicyId = getSponsorshipPolicyId(chainId);
 
-  const publicClient = createPublicClient({ chain, transport: http(rpcUrl) });
+  const publicClient = createPublicClient({
+    chain,
+    transport: http(rpcUrl, instrumentTransport(rpcUrl, chainId, 'rpc')),
+  });
   const entryPoint = getAaEntryPoint();
 
   // Privy's embedded wallet doesn't allow-list every chain (e.g. BSC). The
@@ -61,7 +65,7 @@ export async function createSudoClient(
 
   const pimlicoClient = paymasterUrl
     ? createPimlicoClient({
-        transport: http(paymasterUrl),
+        transport: http(paymasterUrl, instrumentTransport(paymasterUrl, chainId, 'paymaster')),
         entryPoint: { address: entryPoint07Address, version: '0.7' },
       })
     : null;
@@ -77,7 +81,7 @@ export async function createSudoClient(
   return createKernelAccountClient({
     account,
     chain,
-    bundlerTransport: http(bundlerRpc),
+    bundlerTransport: http(bundlerRpc, instrumentTransport(bundlerRpc, chainId, 'bundler')),
     ...(pimlicoClient && {
       paymaster: {
         getPaymasterData: (userOp) =>

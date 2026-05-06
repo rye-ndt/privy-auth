@@ -12,6 +12,7 @@ import { toSudoPolicy } from '@zerodev/permissions/policies';
 import type { EIP1193Provider } from 'viem';
 import type { KernelAccountClient } from '@zerodev/sdk';
 import { createLogger } from './logger';
+import { instrumentTransport } from './rpcTrace';
 import {
   getChainById,
   getChainId,
@@ -211,7 +212,10 @@ export async function createSessionKeyClient(
   try {
     const chain = getChainById(chainId);
     const rpcUrl = getRpcUrlById(chainId);
-    const publicClient = createPublicClient({ transport: http(rpcUrl), chain });
+    const publicClient = createPublicClient({
+      transport: http(rpcUrl, instrumentTransport(rpcUrl, chainId, 'rpc')),
+      chain,
+    });
     const entryPoint = getEntryPoint('0.7');
 
     // Reconstructs the full KernelSmartAccount from the serialized blob.
@@ -225,7 +229,7 @@ export async function createSessionKeyClient(
 
     const pimlicoClient = paymasterUrl
       ? createPimlicoClient({
-          transport: http(paymasterUrl),
+          transport: http(paymasterUrl, instrumentTransport(paymasterUrl, chainId, 'paymaster')),
           entryPoint: { address: entryPoint07Address, version: '0.7' },
         })
       : null;
@@ -238,7 +242,7 @@ export async function createSessionKeyClient(
     return createKernelAccountClient({
       account,
       chain,
-      bundlerTransport: http(bundlerRpc),
+      bundlerTransport: http(bundlerRpc, instrumentTransport(bundlerRpc, chainId, 'bundler')),
       ...(pimlicoClient && {
         paymaster: {
           getPaymasterData: (userOp) =>
