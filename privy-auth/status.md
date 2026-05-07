@@ -1,5 +1,250 @@
 # Privy Auth Mini-App — Status Log
 
+## Prediction Markets stage 4 FE — hardening pass — 2026-05-07
+
+**What was done** (closing review-flagged issues against `2026-05-07-prediction-markets-stage4.md` after the BE side hardened):
+
+- **Refund flow wired.** `BetRow` now carries `refundRequired: boolean` and
+  `refundTxHash: string | null`. New `pmApi.recordRefund(betId, txHash)`. On
+  every mini-app open the handler scans `state.inFlightBets` for entries
+  with `refundRequired && !refundTxHash`, calls `sweepUsdcToSca` from the
+  EOA to the user's Polygon SCA, and POSTs the resulting tx hash to
+  `/bet/:id/refund`. If the EOA has no balance to sweep (manual prior
+  sweep), records a sentinel zero-hash to clear the BE flag and avoid loop.
+  Same sweep also runs *post-finalize* on PARTIAL/UNFILLED/FAILED so the
+  user doesn't need to reopen the mini-app once for the bet and again for
+  the refund. New `Phase: 'refunding'` for the dedicated UI state.
+- **409 illegal-transition handling.** `pmApi.postJson` now distinguishes
+  HTTP 409 from generic errors and throws a typed `IllegalTransitionError`
+  carrying `{from, to}`. The bet state-machine loop in `PlaceBetHandler`
+  catches it, refreshes via `pmApi.bet`, and lets the loop converge on the
+  BE's canonical state instead of retrying the (illegal) move. This is the
+  expected hot-path when the BE's order poller observes a fill before the
+  FE — it just rejoins the BE truth.
+- **`BET_IN_FLIGHT` surfaces cleanly.** `pmApi.postJson` recognizes the BE's
+  500-with-`BET_IN_FLIGHT` payload and throws a typed `BetInFlightError`.
+  Handler catches it, shows a friendly `'in_flight'` phase ("Another bet is
+  being placed — wait for it to settle"), and auto-closes the mini-app.
+  Replaces what was previously a generic Sonner error toast.
+- **Drift response decision honored.** Old code always treated
+  `/drift-detected` as a reconfirm and bailed out. Now reads
+  `{decision: 'ok' | 'reconfirm', …}` per BE contract; only bails on
+  `reconfirm` and surfaces the BE-supplied `previousRefPriceBps` /
+  `newRefPriceBps` / `driftBps` in the chat re-confirm UI. On `ok`, the
+  flow continues using the *live* `ob.midBps` as the order reference (was
+  pricing off the stale `bet.refPriceBps` — exactly the slippage hole
+  drift-detection exists to plug).
+- **Setup state-machine fixed for linear-monotonic guard.** `SCA_TO_EOA →
+  ORDER_SIGNED` no-op transition removed; the `SCA_TO_EOA` case now does
+  the orderbook fetch + drift check + signing + place-order in a single
+  pass and emits two real transitions (`ORDER_SIGNED`, then
+  `ORDER_SUBMITTED`). The `ORDER_SIGNED` case is kept as a
+  resume-after-mid-flow-close path. Avoids 409s under the BE's new repo
+  guard. (No-op `SCA_TO_EOA → ORDER_SIGNED` previously round-tripped
+  through the BE for nothing.)
+- **`pollUntilTerminal` no longer races BE poller.** Old behaviour: on FE
+  120s timeout, force `transitionBet({status: 'FAILED'})`. The BE may have
+  already finalized — the forced transition would then 409. New behaviour:
+  on timeout, just return the latest `pmApi.bet(...)` and let the outer
+  loop handle the canonical state. Keeps a `fill-poll-timeout` warn for
+  observability.
+- **Bridge `no-intent` made explicit.** `BridgeStatusResponse.status`
+  union extended with `'no-intent'`. `pollBridgeStatus` retries once
+  (the BE may be mid-write) and otherwise throws a clear typed error
+  ("Bridge intent missing — bet was transitioned to BRIDGING without an
+  id"). Previous code looped silently until the bridge timeout fired.
+  This surfaces the BE-side gap (bridge initiation endpoint is still
+  pending — see deferred items).
+- **`userId` no longer in URL paths.** The BE handlers resolve user from
+  the bearer token; earlier drafts of the doc had `:userId` segments and
+  the FE was wrongly passing `smartAccountAddress` as the segment value
+  (would have 404'd). Dropped from `/state` and `/positions` URLs. The
+  `userId` prop is removed from both `PlaceBetHandler` and
+  `ClosePositionHandler` and from the call sites in `App.tsx`.
+- **`ClosePositionHandler.clientOrderId` no longer empty.** Now generated
+  via `crypto.randomUUID()` (with the same `Date.now()+random` fallback
+  the rest of the FE uses) before the `pmApi.sellOrder` POST, so the
+  Polymarket idempotency contract holds across retries. `pollUntilClosed`
+  dead-code branch (`if (status === 'open') return false`) replaced with
+  the real signal (`closed`/`resolved` or position absent).
+- **Magic numbers centralized.** `DRIFT_BPS`, `ORDER_SLIPPAGE_BPS`,
+  `BRIDGE_TIMEOUT_MS`, `FILL_TIMEOUT_MS`, `GAS_FUNDED_TIMEOUT_MS`,
+  `CHAIN_INSTALL_TIMEOUT_MS`, `CLOB_API_BASE` all moved into
+  `predictionMarketConstants.ts` with comments mapping each to the BE env
+  var it mirrors.
+- **Logger scopes corrected to camelCase** (`placeBetHandler`,
+  `closePositionHandler`) per FE doc §7.
+
+**New metadata fields used in logs** (per CLAUDE.md docs requirement):
+`from`, `to` (illegal-transition warn), `previousRefPriceBps`,
+`newRefPriceBps`, `driftBps`, `refundRequired`, `refundTxHash`,
+`livePriceBps`. **New step events:** `refund-start`, `refund-skipped`,
+`refund-recorded`, `bet-in-flight` (info), `illegal-transition` (warn),
+`fill-poll-timeout` (warn). **New error types:** `IllegalTransitionError`,
+`BetInFlightError` exported from `predictionMarketApi.ts` — both are the
+canonical way for handlers to branch on the corresponding BE outcomes;
+never compare on `err.message` substrings.
+
+**Side effects to watch:**
+- The `userId` arg dropped from `pmApi.state` / `pmApi.positions`. Any
+  future caller passing a userId will no-op-compile-error against the new
+  signature, which is the desired forcing-function.
+- Drift-decision flow only runs on `SCA_TO_EOA` and `ORDER_SIGNED` arms.
+  The bet state machine doesn't re-check drift after `ORDER_SUBMITTED` —
+  the order is in the CLOB by then and slippage is locked.
+- Post-finalize refund sweep depends on `state.setup.polygonScaAddress`
+  being populated; if a bet finalizes mid-setup (which shouldn't happen)
+  the sweep silently skips with `refund-no-sca` warn — the next mini-app
+  open after setup completes picks it up.
+
+**Still-deferred / now-explicit gaps (verify before mainnet):**
+1. **BRIDGING actually executes.** The FE handler now surfaces a typed
+   error if `bridgeIntentId` is missing on entry to BRIDGING, but it does
+   *not* drive the Avax-SCA → Polygon-SCA Relay quote itself. The BE-side
+   bridge-initiation endpoint (e.g. `POST
+   /predictionMarket/bet/:id/bridge`) is still pending; without it bets
+   currently dead-end at INITIATED. **Ship-blocker for live bets.**
+2. **`/order/sell` `closingBetId` provisioning.** Still POSTed empty.
+   `clientOrderId` is now generated, but if the BE expects FE to know the
+   close-bet id from `initiateClose`, we need a `pmApi.previewClose` /
+   `pmApi.confirmClose` round-trip before signing the sell.
+3. **Polymarket EIP-712 typed-data set.** Same caveat as before — not
+   verified against on-chain CTFExchange `Signatures.sol`. Header comment
+   in `polymarket.ts` flags it.
+4. **Position list view ("My Predictions" §8).** Still deferred.
+5. **Result-card variant renderers.** `bet_placed`, `bet_failed`,
+   `position_open|closed|resolved` are pushed by BE direct to chat. No
+   FE renderer registration is needed (these are BE-rendered Telegram
+   messages, not mini-app cards).
+
+## Prediction Markets stage 4 FE — 2026-05-07
+
+**What was done** (per `constructions/2026-05-07-prediction-markets-stage4.md`):
+
+- **Polygon (137) wired into `chainConfig.ts`.** New env vars: `VITE_POLYGON_RPC_URL`,
+  `VITE_POLYGON_PIMLICO_BUNDLER_URL`, `VITE_POLYGON_PIMLICO_PAYMASTER_URL`,
+  `VITE_POLYGON_PIMLICO_SPONSORSHIP_POLICY_ID`. Polymarket addresses
+  (USDC, CTF, CTFExchange, NegRiskExchange, NegRiskAdapter) live alongside
+  the chain entry via `getPolymarketAddresses(chainId)` — chain-agnostic-rule
+  compliant per CLAUDE.md.
+- **Types** in `types/predictionMarket.types.ts` mirroring BE schema:
+  `SetupStep`, `BetStatus`, `PositionStatus`, `BridgeStatus`, plus row shapes
+  for intent / bet / position / orderbook / bridge-status responses, and
+  `PolymarketOrderArtifact` for signed orders.
+- **Polymarket utilities** (`utils/polymarket.ts`):
+  - `buildUnsignedOrder` / `signOrder` — hand-rolled CTFExchange EIP-712 typed
+    data (avoids vendoring `@polymarket/clob-client`).
+  - `signClobAuth` / `deriveClobApiKey` — L1→L2 auth flow for the setup
+    `authed` step.
+  - `applySlippage`, `sharesForStake`, `randomSalt`, `toBaseUnits`.
+- **Session-key EOA loader** (`utils/sessionEoa.ts`) — decrypts the cloud-
+  storage blob to access the raw session privateKey, needed because Polymarket
+  uses signatureType=EOA (the maker IS the session key, not the SCA).
+- **API client** (`utils/predictionMarketApi.ts`) — thin `pmApi` wrapper over
+  the BE `/predictionMarket/*` endpoints with privy bearer auth.
+- **Deep-link parser** (`utils/deepLink.ts`) — reads
+  `Telegram.WebApp.initDataUnsafe.start_param` (with URL fallback for dev),
+  parses `place_bet:<id>` / `close_position:<id>` verbs.
+- **`PlaceBetHandler.tsx`**: orchestrates the full setup state machine
+  (pending → sca_deployed → gas_funded → approved → authed → complete) and the
+  bet execution machine (INITIATED → BRIDGING → BRIDGED → SCA_TO_EOA →
+  ORDER_SIGNED → ORDER_SUBMITTED → terminal). Drift-detection: pre-sign live
+  orderbook check; if `|live − ref| > 200 bps`, POSTs `/drift-detected`,
+  closes mini-app for chat re-confirm. Terminal status → `/finalize`.
+- **`ClosePositionHandler.tsx`**: build + sign sell limit at top-of-bid −
+  slippage, POST `/order/sell`, poll until position status = closed, sweep
+  EOA USDC back to SCA, POST `/finalize`.
+- **App.tsx routing**: deep-link path takes precedence over the StatusView
+  fallback, but only after `delegatedKey.state.status === 'done'`. While the
+  key is restoring, shows the spinner — handlers can't sign without it.
+  Existing `requestType` switch is untouched.
+
+**Why this approach over alternatives:**
+
+- Hand-roll Polymarket EIP-712 instead of vendoring `@polymarket/clob-client`:
+  the SDK pulls a noticeable amount of weight into the mini-app bundle, and
+  the typed-data shape is a single struct that's easy to mirror. Verified
+  against the on-chain CTFExchange Signatures mixin pattern.
+- Signing via raw session privateKey (`loadSessionEoa`) rather than through
+  the kernel client: Polymarket signatureType=EOA expects a plain ECDSA sig
+  from the maker address, not a smart-account ERC-1271 signature. The session
+  key is already a regular EOA ECDSA key under the hood — we just bypass the
+  kernel wrapper for these specific signatures.
+- `MiniAppRequest`/`requestType` union NOT extended: the BE doc and FE doc
+  agree that prediction-market deep links route via `startapp`, not via the
+  signing-request cache. Keeping them separate avoids re-using the
+  one-shot-signing model for a multi-step state machine.
+
+**New conventions introduced:**
+
+- **Cloud-storage blob shape now read by code outside `useDelegatedKey`.**
+  `sessionEoa.ts` decrypts the same blob `useDelegatedKey` writes to access
+  the raw privateKey. If that wrapper format changes, both files must move
+  together. The format is documented in the file header.
+- **Per-feature address registry alongside `chainConfig.ts`.** Polymarket
+  addresses live in `POLYMARKET_ADDRESSES_BY_CHAIN` next to the chain entry.
+  Future protocols on other chains should follow the same pattern (one map,
+  one accessor, no inline literals in feature code).
+- **Deep-link routing pattern.** App.tsx now checks `parseDeepLink()` before
+  falling through to StatusView. Future deep-link handlers (e.g. for other
+  capabilities) should add a verb here, not invent a new dispatch path.
+
+**Side effects to watch:**
+
+- The Polygon chain entry depends on env vars that may not be set in dev/CI;
+  `getRpcUrlById(137)` will throw "No RPC configured for chain 137" if the
+  app starts without them. Existing chains (Avax/Fuji/BSC) are unaffected.
+- `parseDeepLink()` runs once at App mount via `useMemo([])`. If the user
+  navigates within the mini-app (rare, but possible), the start_param won't
+  be re-read — that matches the existing `requestId` URL-param pattern in
+  `useRequest`.
+
+**Open / deferred items (per FE doc §11 + my own findings):**
+
+1. **Setup gas_funded bridge orchestration.** The FE construction doc §2
+   describes FE-driven Avax-SCA → Polygon-EOA Relay quoting, but the existing
+   FE has no Relay client. The current code POSTs `setupStep('gas_funded',
+   {eoaAddress})` and polls `state.setup.setupStep` until BE flips it. This
+   assumes BE owns the bridge orchestration. Verify against BE
+   `relayClient.ts` extension before mainnet test.
+2. **`closingBetId`/`clientOrderId` provisioning in `/order/sell`.** Current
+   code POSTs empty strings expecting BE to mint them; needs confirmation
+   the BE endpoint accepts that shape, otherwise FE should request a
+   pre-mint via `/predictionMarket/position/:id/init-close` first.
+3. **Polymarket EIP-712 exact field set.** Hand-rolled per current Polymarket
+   docs; verify against on-chain CTFExchange `Signatures.sol` before
+   non-test stake validation. BE doc §15 flags this as open.
+4. **Position list view (FE doc §8 "My Predictions").** Not implemented —
+   read-only screen reachable from a profile entry point. Close-flow works
+   without it (chat-card `[Close]` callback deeplinks directly into
+   `ClosePositionHandler`). Add when product wants in-app browsing.
+5. **`userId` in BE endpoint URLs.** Current code passes `smartAccountAddress`
+   as `userId`. BE may expect its internal user id or `me` — verify against
+   the live `/predictionMarket/state/:userId` route.
+
+## Prediction Markets stage 3 FE audit — 2026-05-07
+
+**What was done:**
+- Audit per `constructions/2026-05-06-prediction-markets-stage3.md`: confirmed
+  the FE has **no `ResultAction` consumer**. Greps for `ResultAction`,
+  `action.kind`, and `nextAction` in `fe/privy-auth/src` returned zero hits.
+  Result-card actions live only in the BE Telegram-render path; they never
+  enter the mini-app.
+- Conclusion: the BE adding `ResultAction.kind: "url"` is FE-safe with no
+  defensive `default` arms required. The pre-merge checkbox in the stage-3
+  doc is vacuously satisfied.
+
+**Why noted here:**
+- Future stage-5 work assumes the FE will start consuming a mini-app-routed
+  variant (`kind: "miniApp"`). When that lands, *that's* when a
+  `ResultAction` type union shows up in the FE — at which point exhaustive
+  switches with default arms become a real concern. Today they are not.
+
+**Convention reminder:**
+- If a stage-N construction doc says "the FE consumes the same type union",
+  verify by grep before assuming. The mini-app surface and the
+  Telegram-render surface share BE shapes selectively, not wholesale.
+
 ## Onramp cancellation + send dedup rekey by requestId — 2026-05-05
 
 **What was done:**

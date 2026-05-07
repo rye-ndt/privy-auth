@@ -1,4 +1,4 @@
-import { avalanche, avalancheFuji, bsc } from 'viem/chains';
+import { avalanche, avalancheFuji, bsc, polygon } from 'viem/chains';
 import type { Chain } from 'viem';
 
 interface ChainEntry {
@@ -7,6 +7,30 @@ interface ChainEntry {
   bundlerUrl: string;
   paymasterUrl?: string;
   sponsorshipPolicyId?: string;
+}
+
+export interface PolymarketAddresses {
+  usdc: `0x${string}`;
+  ctf: `0x${string}`;
+  ctfExchange: `0x${string}`;
+  negRiskExchange: `0x${string}`;
+  negRiskAdapter: `0x${string}`;
+}
+
+const POLYMARKET_ADDRESSES_BY_CHAIN: Record<number, PolymarketAddresses> = {
+  137: {
+    usdc: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
+    ctf: '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045',
+    ctfExchange: '0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E',
+    negRiskExchange: '0xC5d563A36AE78145C45a50134d48A1215220f80a',
+    negRiskAdapter: '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296',
+  },
+};
+
+export function getPolymarketAddresses(chainId: number): PolymarketAddresses {
+  const a = POLYMARKET_ADDRESSES_BY_CHAIN[chainId];
+  if (!a) throw new Error(`No Polymarket addresses configured for chain ${chainId}`);
+  return a;
 }
 
 const CHAIN_REGISTRY: Record<number, ChainEntry> = {
@@ -30,6 +54,13 @@ const CHAIN_REGISTRY: Record<number, ChainEntry> = {
     bundlerUrl: import.meta.env.VITE_BSC_PIMLICO_BUNDLER_URL as string,
     paymasterUrl: import.meta.env.VITE_BSC_PIMLICO_PAYMASTER_URL as string | undefined,
     sponsorshipPolicyId: import.meta.env.VITE_BSC_PIMLICO_SPONSORSHIP_POLICY_ID as string | undefined,
+  },
+  137: {
+    chain: polygon,
+    defaultRpcUrl: import.meta.env.VITE_POLYGON_RPC_URL as string,
+    bundlerUrl: import.meta.env.VITE_POLYGON_PIMLICO_BUNDLER_URL as string,
+    paymasterUrl: import.meta.env.VITE_POLYGON_PIMLICO_PAYMASTER_URL as string | undefined,
+    sponsorshipPolicyId: import.meta.env.VITE_POLYGON_PIMLICO_SPONSORSHIP_POLICY_ID as string | undefined,
   },
 };
 

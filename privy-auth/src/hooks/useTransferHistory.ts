@@ -1,6 +1,7 @@
 import React from 'react';
 import { resilientFetch } from '../utils/resilientFetch';
 import { createLogger } from '../utils/logger';
+import { newRandomId as newRequestId } from '../utils/randomId';
 import { useAppConfig } from './useAppData';
 import type {
   TransferDirection,
@@ -25,15 +26,6 @@ export type UseTransferHistoryReturn = {
   loadMore: () => void;
   refresh: () => void;
 };
-
-function newRequestId(): string {
-  try {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-      return crypto.randomUUID();
-    }
-  } catch {}
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
 
 function parsePage(body: unknown): TransferHistoryPage {
   const b = (body ?? {}) as Record<string, unknown>;

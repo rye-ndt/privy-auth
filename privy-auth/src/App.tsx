@@ -10,6 +10,8 @@ import { SignHandler } from './components/handlers/SignHandler';
 import { YieldDepositHandler } from './components/handlers/YieldDepositHandler';
 import { ApproveHandler } from './components/handlers/ApproveHandler';
 import { OnrampHandler } from './components/handlers/OnrampHandler';
+import { PlaceBetHandler } from './components/handlers/PlaceBetHandler';
+import { ClosePositionHandler } from './components/handlers/ClosePositionHandler';
 import { StatusView } from './components/StatusView';
 import { usePrivyToken } from './hooks/privy';
 import { LoadingSpinner } from './components/atomics/spinner';
@@ -17,6 +19,7 @@ import { FullScreenError } from './components/atomics/FullScreen';
 import { LoginView } from './components/views/login';
 import { createLogger } from './utils/logger';
 import { getOnboardingChainIds } from './utils/chainConfig';
+import { parseDeepLink } from './utils/deepLink';
 
 const log = createLogger('App');
 const TMA_AUTO_LOGIN_TIMEOUT_MS = 4000;
@@ -67,6 +70,7 @@ export default function App() {
   });
 
   const { requestId, request, loading: requestLoading, error: requestError } = useRequest(backendUrl);
+  const deepLink = parseDeepLink();
 
   // Log request load errors.
   React.useEffect(() => {
@@ -103,6 +107,31 @@ export default function App() {
     } else {
       content = <LoginView />;
     }
+  } else if (deepLink && delegatedKey.state.status === 'done') {
+    if (deepLink.kind === 'place_bet') {
+      content = (
+        <PlaceBetHandler
+          intentId={deepLink.intentId}
+          privyToken={privyToken}
+          privyDid={user?.id ?? ''}
+          backendUrl={backendUrl}
+          installedChainIds={delegatedKey.installedChainIds}
+          installOnChain={delegatedKey.installOnChain}
+        />
+      );
+    } else {
+      content = (
+        <ClosePositionHandler
+          positionId={deepLink.positionId}
+          privyToken={privyToken}
+          privyDid={user?.id ?? ''}
+          backendUrl={backendUrl}
+          scaAddress={smartAddress as `0x${string}`}
+        />
+      );
+    }
+  } else if (deepLink) {
+    content = <LoadingSpinner />;
   } else if (!requestId) {
     const delegatedAddress =
       delegatedKey.state.status === 'done' ? delegatedKey.state.record.address : null;
