@@ -186,12 +186,12 @@ export function YieldDepositHandler({
                 : `Withdrawing${meta?.protocolName ? ` from ${meta.protocolName}` : ''}…`}
             </p>
             <p className="text-sm text-white/60">
-              Signing with your delegated key. No action required.
+              The bot is doing this for you. No action needed.
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs text-white/40">
             <Spinner size="xs" />
-            <span>Broadcasting transaction…</span>
+            <span>Sending…</span>
           </div>
         </div>
       </FullScreen>

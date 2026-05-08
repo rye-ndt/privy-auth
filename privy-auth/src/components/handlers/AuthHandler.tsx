@@ -121,7 +121,7 @@ export function AuthHandler({
     delegatedKeyState.status === 'processing'
       ? delegatedKeyState.step
       : phase.kind === 'installing_key'
-        ? 'Installing session key…'
+        ? 'Setting up your bot…'
         : null;
 
   return <FullScreenLoading step={step} />;

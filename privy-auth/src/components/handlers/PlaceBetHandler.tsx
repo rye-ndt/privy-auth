@@ -165,21 +165,21 @@ export function PlaceBetHandler(props: Props) {
               () => installedChainIdsRef.current.includes(POLYMARKET_CHAIN_ID),
               { intervalMs: 200, timeoutMs: CHAIN_INSTALL_TIMEOUT_MS },
             );
-            if (!ok) throw new Error('Polygon session-key install timed out');
+            if (!ok) throw new Error('Setting up Polygon took too long. Please try again.');
           }
           await pmApi.setupStep(ctx, 'sca_deployed', { eoaAddress: eoa.address });
           step = 'sca_deployed';
           break;
         }
         case 'sca_deployed': {
-          setPhaseUnique({ kind: 'setup', step, detail: 'Funding gas on Polygon…' });
+          setPhaseUnique({ kind: 'setup', step, detail: 'Getting ready on Polygon…' });
           await pmApi.setupStep(ctx, 'gas_funded', { eoaAddress: eoa.address });
           await waitForGas();
           step = 'gas_funded';
           break;
         }
         case 'gas_funded': {
-          setPhaseUnique({ kind: 'setup', step, detail: 'Approving Polymarket contracts…' });
+          setPhaseUnique({ kind: 'setup', step, detail: 'Setting up Polymarket access…' });
           const addrs = getPolymarketAddresses(POLYMARKET_CHAIN_ID);
           const approvalTxs: string[] = [];
           for (const target of [addrs.ctfExchange, addrs.negRiskExchange]) {
@@ -204,7 +204,7 @@ export function PlaceBetHandler(props: Props) {
           break;
         }
         case 'approved': {
-          setPhaseUnique({ kind: 'setup', step, detail: 'Authenticating with Polymarket…' });
+          setPhaseUnique({ kind: 'setup', step, detail: 'Connecting to Polymarket…' });
           const auth = await signClobAuth(eoa.privateKey);
           const creds = await deriveClobApiKey(CLOB_API_BASE, auth);
           await pmApi.setupStep(ctx, 'authed', { clobAuth: auth, creds });
@@ -222,7 +222,7 @@ export function PlaceBetHandler(props: Props) {
   };
 
   const runBet = async (intent: IntentDetail, eoa: SessionEoa) => {
-    if (!intent.bet) throw new Error('Bet row not initialized by BE for this intent');
+    if (!intent.bet) throw new Error("Couldn't load your bet. Please try again from chat.");
     let bet = intent.bet;
     const startMs = Date.now();
     log.info('step', { step: 'bet-started', requestId: intentId, betId: bet.id, status: bet.status });
@@ -237,20 +237,20 @@ export function PlaceBetHandler(props: Props) {
             // `bridgeIntentId` to appear on the bet row before transitioning
             // to BRIDGING. Throws (rather than silent-timeouts) if it never
             // shows up — the BE bridge endpoint is missing in that case.
-            setPhaseUnique({ kind: 'executing', status: bet.status, detail: 'Waiting for bridge…' });
+            setPhaseUnique({ kind: 'executing', status: bet.status, detail: 'Preparing to move your money…' });
             const polled = await pollUntil(
               () => pmApi.bet(ctx, bet.id),
               (b) => b.bridgeIntentId != null,
               { intervalMs: POLL_INTERVAL_MS, timeoutMs: 2 * POLL_INTERVAL_MS },
             );
             if (!polled) {
-              throw new Error('Bridge has not been initiated for this bet (BE pending).');
+              throw new Error("We couldn't move your money for this bet yet. Please try again shortly.");
             }
             bet = polled;
             break;
           }
           case 'BRIDGING': {
-            setPhaseUnique({ kind: 'executing', status: bet.status, detail: 'Bridging to Polygon…' });
+            setPhaseUnique({ kind: 'executing', status: bet.status, detail: 'Moving your money to Polygon…' });
             const status = await pollBridgeStatus(bet.id);
             if (status === 'success') {
               bet = await pmApi.transitionBet(ctx, bet.id, { status: 'BRIDGED' });
@@ -263,7 +263,7 @@ export function PlaceBetHandler(props: Props) {
             break;
           }
           case 'BRIDGED': {
-            setPhaseUnique({ kind: 'executing', status: bet.status, detail: 'Routing stake to executor…' });
+            setPhaseUnique({ kind: 'executing', status: bet.status, detail: 'Preparing your bet…' });
             const addrs = getPolymarketAddresses(POLYMARKET_CHAIN_ID);
             const stake = parseUnits(bet.stakeUsdc, 6);
             const data = encodeFunctionData({
@@ -287,7 +287,7 @@ export function PlaceBetHandler(props: Props) {
             break;
           }
           case 'ORDER_SUBMITTED': {
-            setPhaseUnique({ kind: 'executing', status: bet.status, detail: 'Waiting for fill…' });
+            setPhaseUnique({ kind: 'executing', status: bet.status, detail: 'Waiting for confirmation…' });
             bet = await pollUntilTerminal(bet.id);
             break;
           }
@@ -364,7 +364,7 @@ export function PlaceBetHandler(props: Props) {
       scheduleClose();
       return { kind: 'reconfirm' };
     }
-    setPhaseUnique({ kind: 'executing', status: bet.status, detail: 'Signing order…' });
+    setPhaseUnique({ kind: 'executing', status: bet.status, detail: 'Placing your bet…' });
     // Price off the live mid (not the stale `bet.refPriceBps`) — closes
     // the slippage hole the drift gate is meant to plug.
     const limitPriceBps = applySlippage(ob.midBps, ORDER_SLIPPAGE_BPS, 'BUY');
@@ -426,7 +426,7 @@ export function PlaceBetHandler(props: Props) {
     if (!result) return 'timeout';
     if (result.status === 'success') return 'success';
     if (result.status === 'no-intent') {
-      throw new Error('Bridge intent missing — bet was transitioned to BRIDGING without an id.');
+      throw new Error("Couldn't move your money for this bet. Please try again.");
     }
     return 'refund';
   };
@@ -450,7 +450,7 @@ export function PlaceBetHandler(props: Props) {
       (s) => POST_GAS_SETUP_STEPS.has(s.setup.setupStep),
       { intervalMs: POLL_INTERVAL_MS, timeoutMs: GAS_FUNDED_TIMEOUT_MS },
     );
-    if (!result) throw new Error('Gas funding timed out');
+    if (!result) throw new Error('Setting up network fees took too long. Please try again.');
   };
 
   const sendUserOp = async (
@@ -476,7 +476,7 @@ export function PlaceBetHandler(props: Props) {
           <div className="text-4xl">⏳</div>
           <p className="text-white font-semibold">Another bet is being placed</p>
           <p className="text-sm text-white/70">
-            Wait for it to settle, then try again from chat.
+            Wait for it to finish, then try again from chat.
           </p>
         </div>
       </FullScreen>
@@ -487,10 +487,10 @@ export function PlaceBetHandler(props: Props) {
       <FullScreen>
         <div className="flex flex-col items-center gap-4 max-w-sm text-center">
           <div className="text-4xl">⚠️</div>
-          <p className="text-white font-semibold">Price moved</p>
+          <p className="text-white font-semibold">The price changed</p>
           <p className="text-sm text-white/70">
             {(phase.previousRefPriceBps / 100).toFixed(1)}% → {(phase.newRefPriceBps / 100).toFixed(1)}%
-            ({(phase.driftBps / 100).toFixed(1)}% drift). Re-confirm in chat to continue.
+            ({(phase.driftBps / 100).toFixed(1)}% change). Confirm again in chat to continue.
           </p>
         </div>
       </FullScreen>
@@ -501,10 +501,10 @@ export function PlaceBetHandler(props: Props) {
       <FullScreen>
         <div className="flex flex-col items-center gap-5 max-w-sm text-center">
           <ShieldIcon size={64} variant="violet" />
-          <p className="text-white font-semibold text-lg">Returning unused funds</p>
+          <p className="text-white font-semibold text-lg">Returning unused money</p>
           <div className="flex items-center gap-2 text-xs text-white/60">
             <Spinner size="xs" />
-            <span>Sweeping residual USDC to your wallet…</span>
+            <span>Sending leftover USDC back to your wallet…</span>
           </div>
         </div>
       </FullScreen>
@@ -535,10 +535,32 @@ export function PlaceBetHandler(props: Props) {
   );
 }
 
+const SETUP_STEP_LABELS: Record<SetupStep, string> = {
+  pending: 'Setting up…',
+  sca_deployed: 'Setting up your wallet…',
+  gas_funded: 'Setting up network fees…',
+  approved: 'Allowing trades…',
+  authed: 'Connecting to Polymarket…',
+  complete: 'Ready',
+};
+
+const EXEC_STATUS_LABELS: Record<BetStatus, string> = {
+  INITIATED: 'Starting…',
+  BRIDGING: 'Moving your money…',
+  BRIDGED: 'Preparing your bet…',
+  SCA_TO_EOA: 'Preparing your bet…',
+  ORDER_SIGNED: 'Placing your bet…',
+  ORDER_SUBMITTED: 'Waiting for confirmation…',
+  FILLED: 'Done',
+  PARTIAL: 'Partially filled',
+  UNFILLED: 'Not filled',
+  FAILED: 'Failed',
+};
+
 function labelForPhase(phase: Phase): string {
   if (phase.kind === 'loading') return 'Loading…';
-  if (phase.kind === 'setup') return phase.detail ?? `Setup: ${phase.step}`;
-  if (phase.kind === 'executing') return phase.detail ?? phase.status;
+  if (phase.kind === 'setup') return phase.detail ?? SETUP_STEP_LABELS[phase.step];
+  if (phase.kind === 'executing') return phase.detail ?? EXEC_STATUS_LABELS[phase.status];
   return '';
 }
 

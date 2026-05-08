@@ -54,7 +54,7 @@ export function SigningRequestModal({
     try {
       await approve();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Transaction failed');
+      setError(err instanceof Error ? err.message : 'Something went wrong');
       setLoading(false);
     }
   };
@@ -78,7 +78,7 @@ export function SigningRequestModal({
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-[10px] font-semibold tracking-widest text-amber-400 uppercase">
-              Transaction request from bot
+              Action from your bot
             </p>
             <p className="text-sm font-semibold text-white truncate">{event.description}</p>
           </div>
@@ -87,10 +87,10 @@ export function SigningRequestModal({
         <div className="px-5 py-4 max-h-72 overflow-y-auto">
           {!showRaw ? (
             <div className="space-y-2.5">
-              <Row label="To" value={event.to} mono />
-              <Row label="Value" value={`${formatValue(event.value)} AVAX`} mono />
+              <Row label="Going to" value={event.to} mono />
+              <Row label="Amount" value={`${formatValue(event.value)} AVAX`} mono />
               {event.data && event.data !== '0x' && (
-                <Row label="Calldata" value={truncateHex(event.data)} mono />
+                <Row label="Details" value={truncateHex(event.data)} mono />
               )}
             </div>
           ) : (
@@ -121,7 +121,7 @@ export function SigningRequestModal({
             disabled={loading}
             className="flex-1 py-2.5 rounded-xl text-sm font-medium text-red-400 border border-red-500/30 hover:bg-red-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            Reject
+            Deny
           </button>
           <button
             onClick={handleApprove}
@@ -131,10 +131,10 @@ export function SigningRequestModal({
             {loading ? (
               <>
                 <span className="w-3.5 h-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                Signing…
+                Working…
               </>
             ) : (
-              'Approve'
+              'Allow'
             )}
           </button>
         </div>

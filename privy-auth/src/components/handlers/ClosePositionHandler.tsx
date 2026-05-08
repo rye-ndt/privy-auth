@@ -57,9 +57,9 @@ export function ClosePositionHandler(props: Props) {
         log.info('step', { step: 'started', positionId });
         const positions = await pmApi.positions(ctx);
         const pos = positions.find((p) => p.id === positionId);
-        if (!pos) throw new Error('Position not found');
+        if (!pos) throw new Error("Couldn't find this position.");
         if (pos.status !== 'open' && pos.status !== 'closing') {
-          throw new Error(`Position is ${pos.status} — cannot close`);
+          throw new Error(`This position is ${pos.status} and can't be closed.`);
         }
         await runClose(pos);
       } catch (err) {
@@ -72,11 +72,11 @@ export function ClosePositionHandler(props: Props) {
   }, [positionId]);
 
   const runClose = async (pos: PositionRow) => {
-    setPhaseUnique({ kind: 'executing', detail: 'Quoting…' });
+    setPhaseUnique({ kind: 'executing', detail: 'Getting price…' });
     const ob = await pmApi.orderbook(ctx, pos.outcomeTokenId);
     const limitPriceBps = applySlippage(ob.bestBidBps, ORDER_SLIPPAGE_BPS, 'SELL');
 
-    setPhaseUnique({ kind: 'executing', detail: 'Signing order…' });
+    setPhaseUnique({ kind: 'executing', detail: 'Placing your sell…' });
     const eoa = await loadSessionEoa(privyDid);
     const order = await signOrder(
       eoa.privateKey,
@@ -104,14 +104,14 @@ export function ClosePositionHandler(props: Props) {
     });
     log.info('step', { step: 'submitted', positionId, clientOrderId, polymarketOrderId: placed.polymarketOrderId });
 
-    setPhaseUnique({ kind: 'executing', detail: 'Waiting for fill…' });
+    setPhaseUnique({ kind: 'executing', detail: 'Waiting for confirmation…' });
     if (!await pollUntilClosed(pos.id)) {
       log.warn('close-not-filled', { positionId });
       await pmApi.finalizePosition(ctx, pos.id, { status: 'failed' });
-      throw new Error('Close did not fill within timeout');
+      throw new Error("Your sell didn't go through in time. Please try again.");
     }
 
-    setPhaseUnique({ kind: 'executing', detail: 'Returning funds to wallet…' });
+    setPhaseUnique({ kind: 'executing', detail: 'Returning money to your wallet…' });
     await sweepUsdcToSca(eoa.privateKey, scaAddress);
 
     await pmApi.finalizePosition(ctx, pos.id, { status: 'closed' });

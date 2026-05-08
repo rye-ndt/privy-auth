@@ -197,7 +197,7 @@ export function ApprovalOnboarding({
       : null;
   const progressStep =
     stepperLabel ??
-    (posting ? 'Saving limits…' : null);
+    (posting ? 'Saving…' : null);
 
   return (
     <div className="flex flex-col items-center justify-center w-full min-h-dvh bg-[#0f0f1a] px-6 gap-6">
@@ -210,14 +210,14 @@ export function ApprovalOnboarding({
 
       <div className="text-center max-w-xs">
         <h1 className="text-xl font-bold text-white mb-2">
-          {reapproval ? 'Renew Spending Limit' : 'Enable Autonomous Trading'}
+          {reapproval ? 'Refresh Spending Cap' : 'Let the bot trade for you'}
         </h1>
         <p className="text-sm text-white/40 leading-relaxed">
           {reapproval
-            ? 'Your spending limit has been reached. Approve a new limit to let the bot continue trading on your behalf.'
+            ? 'The bot has used up its spending cap. Set a new cap so it can keep trading for you.'
             : targetChainIds.length > 1
-              ? `We'll enable the agent on ${targetChainIds.map(chainName).join(' and ')} so you can trade everywhere with one approval. ${targetChainIds.length} quick signatures.`
-              : 'To let the bot trade on your behalf, approve the following spending limits (one-time, revocable):'}
+              ? `We'll set up the bot on ${targetChainIds.map(chainName).join(' and ')} so it can trade for you on both. ${targetChainIds.length} quick taps.`
+              : 'Set how much of your money the bot can use. You can change or stop this anytime.'}
         </p>
       </div>
 
@@ -226,7 +226,7 @@ export function ApprovalOnboarding({
           {!approvalParams ? (
             <div className="flex justify-center py-6"><Spinner size="md" /></div>
           ) : approvalParams.length === 0 ? (
-            <p className="text-xs text-white/30 text-center">No token limits required.</p>
+            <p className="text-xs text-white/30 text-center">No spending caps needed.</p>
           ) : (
             approvalParams.map((p) => <TokenLimitRow key={p.tokenAddress} param={p} />)
           )}
@@ -260,7 +260,7 @@ export function ApprovalOnboarding({
           <ShieldIcon size={48} variant="success" />
           <p className="text-white font-semibold">All set!</p>
           <p className="text-sm text-white/40 max-w-xs leading-relaxed">
-            The bot is ready to trade on your behalf. Return to Telegram to get started.
+            The bot is ready to trade for you. Return to Telegram to get started.
           </p>
         </div>
       )}
@@ -275,17 +275,17 @@ export function ApprovalOnboarding({
           {working ? (
             <span className="flex items-center justify-center gap-2">
               <Spinner size="sm" className="border-white/20 border-t-white" />
-              {posting ? 'Saving…' : 'Approving…'}
+              {posting ? 'Saving…' : 'Allowing…'}
             </span>
           ) : (
-            'Approve'
+            'Allow'
           )}
         </button>
       )}
 
       {!success && approvalParams && approvalParams.length > 0 && (
         <p className="text-[11px] text-white/20 text-center max-w-xs leading-relaxed px-2">
-          These limits are enforced by the Aegis server. You can revoke access at any time.
+          Aegis enforces these caps. You can change or stop them anytime.
         </p>
       )}
 
@@ -316,6 +316,7 @@ function TokenLimitRow({ param }: { param: ApprovalParam }) {
         <span className="text-sm font-bold text-white">{param.tokenSymbol}</span>
       </div>
       <span className="text-sm text-violet-300 font-semibold">
+        <span className="text-white/40 font-normal">up to </span>
         {toHumanAmount(param.suggestedLimitRaw, param.tokenDecimals)} <span className="font-bold">{param.tokenSymbol}</span>
       </span>
     </div>

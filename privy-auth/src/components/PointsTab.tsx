@@ -4,8 +4,8 @@ import type { LedgerEntry } from '../hooks/useLoyalty';
 const HISTORY_PAGE_SIZE = 10;
 
 const ACTION_LABELS: Record<string, string> = {
-  swap_same_chain: 'Swap (same-chain)',
-  swap_cross_chain: 'Swap (cross-chain)',
+  swap_same_chain: 'Swap',
+  swap_cross_chain: 'Cross-network swap',
   send_erc20: 'Send',
   yield_deposit: 'Yield deposit',
   yield_hold_day: 'Yield holding',

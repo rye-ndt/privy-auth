@@ -33,27 +33,27 @@ export function ConfigsTab({
         <SectionLabel>Your Wallet</SectionLabel>
         {smartAddress && (
           <AddressCard
-            label="Smart Account"
+            label="Main Wallet"
             desc="receives funds"
             address={smartAddress}
           />
         )}
-        <AddressCard label="Signing Address" desc="EOA" address={eoaAddress} />
+        <AddressCard label="Backup Wallet" desc="for advanced use" address={eoaAddress} />
       </div>
 
       <div className="flex flex-col gap-4">
-        <SectionLabel>AI Agent</SectionLabel>
+        <SectionLabel>Your Bot</SectionLabel>
 
         {delegatedAddress ? (
           <AddressCard
-            label="Agent Address"
-            desc="delegated key"
+            label="Bot Address"
+            desc="trades for you"
             address={delegatedAddress}
           />
         ) : (
           <div className="flex items-center gap-3 bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-3.5">
             <div className="w-1.5 h-1.5 flex-shrink-0 rounded-full bg-white/15" />
-            <p className="text-xs text-white/25">No agent connected</p>
+            <p className="text-xs text-white/25">No bot connected</p>
           </div>
         )}
 
@@ -61,7 +61,7 @@ export function ConfigsTab({
           <div className="flex items-center gap-3 bg-emerald-500/5 border border-emerald-500/20 rounded-xl px-4 py-3.5">
             <div className="w-1.5 h-1.5 flex-shrink-0 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]" />
             <p className="text-xs text-emerald-400">
-              Agent disconnected — reload to reconnect
+              Bot disconnected — reload to reconnect
             </p>
           </div>
         ) : (
@@ -69,11 +69,11 @@ export function ConfigsTab({
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-semibold text-white/80 mb-1">
-                  Disconnect AI Agent
+                  Disconnect Bot
                 </p>
                 <p className="text-[11px] text-white/35 leading-relaxed">
-                  Stop the agent from automatically executing trades and
-                  transactions on your behalf.
+                  Stop the bot from automatically running trades and
+                  transactions for you.
                 </p>
               </div>
               <button
@@ -90,7 +90,7 @@ export function ConfigsTab({
       <PermissionsSection />
 
       {showModal && (
-        <RemoveAgentModal
+        <RemoveBotModal
           onConfirm={handleRemove}
           onCancel={() => setShowModal(false)}
           loading={removing}
@@ -154,7 +154,7 @@ function PermissionsSection() {
 
   return (
     <div className="flex flex-col gap-3">
-      <SectionLabel>What the agent can do</SectionLabel>
+      <SectionLabel>What the bot can do</SectionLabel>
 
       {loading && (
         <div className="flex flex-col gap-2">
@@ -176,7 +176,7 @@ function PermissionsSection() {
       {!loading && !error && grants?.length === 0 && (
         <div className="flex items-center justify-center h-14 bg-white/[0.03] border border-white/[0.05] rounded-xl">
           <p className="text-[11px] text-white/25">
-            No spending permissions granted
+            No spending caps set
           </p>
         </div>
       )}
@@ -253,7 +253,7 @@ function GrantRow({ grant }: { grant: GrantPermission }) {
       </div>
 
       <div className="flex items-center justify-between text-[11px]">
-        <span className="text-white/35">Spending limit</span>
+        <span className="text-white/35">Spending cap</span>
         <span className="text-white/65 font-mono">
           {formatAmount(max)}{grant.tokenSymbol ? <> <span className="font-bold text-white/80">{grant.tokenSymbol}</span></> : ""}
         </span>
@@ -283,7 +283,7 @@ function GrantRow({ grant }: { grant: GrantPermission }) {
   );
 }
 
-function RemoveAgentModal({
+function RemoveBotModal({
   onConfirm,
   onCancel,
   loading,
@@ -317,7 +317,7 @@ function RemoveAgentModal({
           </div>
           <div>
             <p className="text-white font-semibold text-sm">
-              Disconnect AI Agent?
+              Disconnect Bot?
             </p>
             <p className="text-white/40 text-[11px] mt-0.5">
               This cannot be undone from here
@@ -326,8 +326,8 @@ function RemoveAgentModal({
         </div>
 
         <p className="text-white/60 text-[13px] leading-relaxed">
-          The agent will no longer be able to automatically execute transactions
-          on your behalf. You'll need to reconnect it the next time you open
+          The bot will no longer be able to run transactions for you
+          automatically. You'll need to reconnect it the next time you open
           Aegis.
         </p>
 

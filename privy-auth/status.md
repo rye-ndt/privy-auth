@@ -1,5 +1,188 @@
 # Privy Auth Mini-App — Status Log
 
+## Revoke flow rewrite — 2026-05-08
+
+**What** — `useDelegatedKey.removeKey` now performs a full revoke instead of
+just clearing local storage. New steps, in order:
+
+1. **Onchain invalidation** — for every chain in `installedChainIds`, builds a
+   sudo-only Kernel client (Privy EOA owner) and calls the new
+   `uninstallSessionKey` helper in `utils/crypto.ts`, which submits an
+   `uninstallPlugin` userOp against the same regular-validator identity the
+   install path produced. Mining the userOp removes the validator from the
+   kernel, voiding every spending-cap policy attached to it. Each chain is
+   independent — a Privy popup rejection or RPC failure on chain A does not
+   block chain B.
+2. **Backend revoke** — POSTs `${backendUrl}/delegation/revoke` with the
+   user's Privy bearer. The endpoint clears Redis (`delegation:<addr>`),
+   deletes every `token_delegations` row for the user, and flips
+   `userProfiles.sessionKeyStatus = REVOKED` while clearing
+   `sessionKeyAddress` / `sessionKeyExpiresAtEpoch`.
+3. **Local wipe** — only after the above (regardless of their success) we
+   `cloudStorageRemoveItem('delegated_key')` and reset hook state. Local
+   wipe always runs because otherwise a backend hiccup would leave the user
+   stuck with a key they can't refresh from the UI.
+
+**Why** — old `removeKey` cleared only Telegram CloudStorage, so:
+- the kernel's regular validator + its caps stayed live onchain;
+- BE redis cache + `token_delegations` rows kept lying around, so
+  `aegisGuardInterceptor` saw "delegations cover this spend" and silently
+  auto-signed the next /send instead of re-prompting the user;
+- `userProfile.sessionKeyStatus` enum had `REVOKED` but nobody ever wrote it.
+
+**Wiring** — `useDelegatedKey` now takes optional `backendUrl` + `privyToken`
+options; `App.tsx` threads them in. `ConfigsTab` keeps the same `removeKey`
+prop signature, so its call site is unchanged.
+
+**Failure model** — every step is best-effort and logs `warn` on failure. The
+user sees `"Key removed — reload to create a new one."` either way; debug logs
+distinguish backend / onchain / provider failures via scoped log events
+(`onchain-revoke-*`, `backend-revoke-*`).
+
+## Web2-friendly UX wording revamp — 2026-05-08
+
+**What was done** (no flow / sequence / chart changes — wording-only pass to
+remove web3 jargon for web2 onboarders):
+
+- **ApprovalOnboarding.tsx** — title `Enable Autonomous Trading` →
+  `Let the bot trade for you`; reapproval title → `Refresh Spending Cap`;
+  body copy reframed as "Set how much of your money the bot can use";
+  primary CTA `Approve` → `Allow` (and `Approving…` → `Allowing…`);
+  `TokenLimitRow` now annotates the amount with "Bot can use up to"
+  so the row is self-explanatory without surrounding context;
+  footer `These limits are enforced by the Aegis server. You can revoke
+  access at any time.` → `Aegis enforces these caps. You can change or
+  stop them anytime.`; `No token limits required.` →
+  `No spending caps needed.`; `Saving limits…` → `Saving…`.
+- **BscDelegationModal.tsx** — `Enable {chain}` → `Connect {chain}`;
+  body → "Allow the bot to trade on {chain} for you. One quick tap.";
+  CTA `Approve` → `Allow`; success title → `{chain} connected`;
+  loading `Approving on {chain}…` → `Connecting to {chain}…`.
+- **ConfigsTab.tsx** — `Smart Account` / `Signing Address` (`EOA`) →
+  `Main Wallet` (`receives funds`) / `Backup Wallet` (`for advanced use`);
+  `AI Agent` section header → `Your Bot`; `Agent Address` (`delegated key`)
+  → `Bot Address` (`trades for you`); `No agent connected` →
+  `No bot connected`; `Disconnect AI Agent` → `Disconnect Bot` (and the
+  modal title + body copy); `What the agent can do` → `What the bot can do`;
+  `Spending limit` → `Spending cap`; `No spending permissions granted` →
+  `No spending caps set`; internal modal renamed `RemoveAgentModal` →
+  `RemoveBotModal` (sole call-site updated).
+- **SigningRequestModal.tsx** — header `Transaction request from bot` →
+  `Action from your bot`; row labels `To` / `Value` / `Calldata` →
+  `Going to` / `Amount` / `Details`; CTAs `Approve`/`Reject` → `Allow`/`Deny`;
+  loading `Signing…` → `Working…`; default catch fallback `Transaction failed`
+  → `Something went wrong`. Raw-data toggle preserved as power-user view.
+- **SignHandler.tsx** — `Auto-sign failed` → `Couldn't complete this for you`;
+  `Preparing your session key` / `Signing with your delegated key` →
+  `Getting ready` / `Doing this for you`; corresponding subtitles dropped
+  references to "session key" / "delegated key" / "popup"; status spinners
+  `Loading key…` / `Broadcasting transaction…` → `Getting ready…` /
+  `Sending…`; success `Transaction sent` → `Done`; manual-retry banner
+  `Auto-sign failed — please approve manually.` →
+  `Couldn't auto-handle this — please confirm manually.`.
+- **ApproveHandler.tsx** — success title `Agent Connected` → `Bot Connected`;
+  loading `Installing session key…` → `Setting up your bot…`.
+- **AuthHandler.tsx** — `Installing session key…` → `Setting up your bot…`.
+- **PlaceBetHandler.tsx** — every per-phase `detail` string rewritten to
+  plain language: `Funding gas on Polygon…` → `Getting ready on Polygon…`;
+  `Approving Polymarket contracts…` → `Setting up Polymarket access…`;
+  `Authenticating with Polymarket…` → `Connecting to Polymarket…`;
+  `Waiting for bridge…` → `Preparing to move your money…`;
+  `Bridging to Polygon…` → `Moving your money to Polygon…`;
+  `Routing stake to executor…` → `Preparing your bet…`;
+  `Signing order…` → `Placing your bet…`;
+  `Waiting for fill…` → `Waiting for confirmation…`;
+  `Returning unused funds` / `Sweeping residual USDC to your wallet…` →
+  `Returning unused money` / `Sending leftover USDC back to your wallet…`;
+  `Price moved` / `… drift). Re-confirm in chat to continue.` →
+  `The price changed` / `… change). Confirm again in chat to continue.`;
+  user-visible `throw new Error(...)` strings (`Polygon session-key install
+  timed out`, `Bridge has not been initiated for this bet (BE pending).`,
+  `Bridge intent missing — bet was transitioned to BRIDGING without an id.`,
+  `Gas funding timed out`, `Bet row not initialized by BE for this intent`)
+  rewritten to plain English. Added `SETUP_STEP_LABELS` and
+  `EXEC_STATUS_LABELS` maps so the brief moment between transitions never
+  shows raw status codes (`SCA_TO_EOA`, `ORDER_SUBMITTED`, etc.) to the
+  user — `labelForPhase` falls through these maps instead of the enum
+  value. Status-code constants in code are unchanged (still the BE
+  contract).
+- **ClosePositionHandler.tsx** — `Quoting…` → `Getting price…`;
+  `Signing order…` → `Placing your sell…`; `Waiting for fill…` →
+  `Waiting for confirmation…`; `Returning funds to wallet…` →
+  `Returning money to your wallet…`; user-visible errors
+  (`Position not found`, `Position is X — cannot close`, `Close did not
+  fill within timeout`) rewritten.
+- **YieldDepositHandler.tsx** — `Signing with your delegated key. No
+  action required.` → `The bot is doing this for you. No action needed.`;
+  `Broadcasting transaction…` → `Sending…`.
+- **HomeTab.tsx** — tagline `Onchain AI Agent` → `Your AI trading bot`;
+  delegation banner `Setting up AI Agent` → `Setting up your bot`;
+  auth pill `Authenticated` / `Not Authenticated` → `Signed in` /
+  `Not signed in`.
+- **login.tsx** — `Your secure onchain identity, powered by Google` →
+  `Your secure account, powered by Google`; footer `A wallet is created
+  automatically if you don't have one.` → `An account is created for you
+  automatically.`.
+- **PointsTab.tsx** — action labels `Swap (same-chain)` /
+  `Swap (cross-chain)` → `Swap` / `Cross-network swap`. Action keys are
+  unchanged (still match BE ledger codes).
+- **interpretSignError.ts** — every `friendly` field rewritten to plain
+  English: gas/sponsorship messages talk about "network fees" instead of
+  "Pimlico balance" / "gas sponsorship policy"; `Token spending allowance
+  is too low. Please approve more and try again.` →
+  `Your spending cap is too low. Increase it and try again.`;
+  `Signature was rejected. The session key may have expired — please
+  re-link.` → `Your bot's connection expired — please reconnect it.`;
+  `Transaction was rejected.` → `Action was cancelled.`; default fallback
+  shortened to `Something went wrong. Please try again.`. Error
+  *codes* are untouched — they're the contract the BE branches on.
+
+**Why this approach over alternatives:**
+
+- *Keep token symbols (USDC) as-is, plain language only in surrounding
+  prose.* The user's brief said "100 usd in your wallet" but USDC ≠ USD;
+  silently swapping the symbol on token rows / balances would be product
+  fraud. Instead, descriptions / sentences talk about "your money" and
+  the row annotation reads "Bot can use up to {N} USDC" so a non-crypto
+  user can map the symbol to a dollar amount the first time they see it.
+- *Phase / setup-step labels live next to the state machine, not in a
+  central i18n map.* Two reasons: (a) we already have only one locale,
+  so an i18n layer is over-engineering, and (b) the maps are tied 1:1
+  to the BE-defined `BetStatus` / `SetupStep` enums — colocating them
+  means a new BE status forces a TS exhaustiveness error here, which is
+  the desired forcing-function. If a third locale ever ships, lift them
+  into a translations module then.
+- *`throw new Error(...)` strings rewritten to plain English even though
+  they're "internal".* These bubble up through `setPhaseUnique({ kind:
+  'error', message })` and end up in `FullScreenError` verbatim — they
+  ARE user-facing in practice. Dev-time-only errors (`Embedded wallet
+  not available`, `keypair not initialised`, `no session-key blob for
+  chain X`) were left alone — they only fire on a broken install / mid-
+  initialization race that an end user shouldn't hit.
+
+**No new conventions introduced.** No new metadata fields. No log scope
+changes. No flow / handler / state-machine logic touched. Internal
+identifiers (`SCA_TO_EOA`, `ORDER_SIGNED`, `setupStep === 'authed'`,
+log scopes like `placeBetHandler`, error codes in `interpretSignError`)
+are all unchanged so BE compatibility, log queries, and analytics
+funnels continue to work.
+
+**Side effects to watch:**
+
+- `RemoveAgentModal` → `RemoveBotModal` is a private component renamed
+  in-file with its sole caller updated; nothing imports it externally
+  (verified via grep). If anyone adds a re-export later they'll need to
+  use the new name.
+- `EXEC_STATUS_LABELS` and `SETUP_STEP_LABELS` are exhaustive over the
+  current enums via `Record<…>`. If a new `BetStatus` / `SetupStep` is
+  added BE-side without updating these maps, TS will fail the build —
+  by design.
+- A few interim phases (`status: bet.status` set without `detail` at the
+  top of the `while` loop) used to render the raw enum value for one
+  render pass before the case-specific `setPhaseUnique` overrode it.
+  After this change those interim renders show humanized text. Net
+  effect: no jargon flashes, no behavior change.
+
 ## Prediction Markets stage 4 FE — hardening pass — 2026-05-07
 
 **What was done** (closing review-flagged issues against `2026-05-07-prediction-markets-stage4.md` after the BE side hardened):

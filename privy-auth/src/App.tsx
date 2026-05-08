@@ -67,6 +67,8 @@ export default function App() {
     signerWallet: embeddedWallet,
     privyDid: user?.id ?? '',
     chainIds: getOnboardingChainIds(),
+    backendUrl,
+    privyToken: privyToken ?? undefined,
   });
 
   const { requestId, request, loading: requestLoading, error: requestError } = useRequest(backendUrl);

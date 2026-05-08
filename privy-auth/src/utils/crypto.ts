@@ -4,7 +4,7 @@ import { toOwner } from 'permissionless/utils';
 import { createPimlicoClient } from 'permissionless/clients/pimlico';
 import { entryPoint07Address } from 'viem/account-abstraction';
 import { signerToEcdsaValidator } from '@zerodev/ecdsa-validator';
-import { createKernelAccount, createKernelAccountClient, addressToEmptyAccount } from '@zerodev/sdk';
+import { createKernelAccount, createKernelAccountClient, addressToEmptyAccount, uninstallPlugin } from '@zerodev/sdk';
 import { getEntryPoint, KERNEL_V3_1 } from '@zerodev/sdk/constants';
 import { toECDSASigner } from '@zerodev/permissions/signers';
 import { toPermissionValidator, serializePermissionAccount, deserializePermissionAccount } from '@zerodev/permissions';
@@ -260,4 +260,96 @@ export async function createSessionKeyClient(
     log.error('createSessionKeyClient failed', { chainId, err: msg });
     throw err;
   }
+}
+
+// ---------------------------------------------------------------------------
+// ZeroDev session key revocation
+//
+// Onchain invalidation of every spending cap held by a session key. We rebuild
+// the same `regular` permission validator the install path used (same session
+// key address, same sudo policy shape) and call `uninstallPlugin` with the
+// kernel running under the *sudo* (Privy EOA) validator. The userOp triggers a
+// Privy popup; once mined the kernel deletes the regular validator from
+// storage so any cap-policy state attached to it is unreachable.
+// ---------------------------------------------------------------------------
+export async function uninstallSessionKey(
+  provider: EIP1193Provider,
+  signerAddress: `0x${string}`,
+  sessionKeyAddress: `0x${string}`,
+  chainId: number,
+): Promise<`0x${string}`> {
+  const chain = getChainById(chainId);
+  const rpcUrl = getRpcUrlById(chainId);
+  const signerChain = getChainById(getChainId());
+
+  const walletClient = createWalletClient({
+    account: signerAddress,
+    chain: signerChain,
+    transport: custom(provider as Parameters<typeof custom>[0]),
+  });
+  const privySigner = await toOwner({ owner: walletClient });
+  const publicClient = createPublicClient({ transport: http(rpcUrl), chain });
+  const entryPoint = getEntryPoint('0.7');
+  const kernelVersion = KERNEL_V3_1;
+
+  const ecdsaValidator = await signerToEcdsaValidator(publicClient, {
+    entryPoint,
+    signer: privySigner,
+    kernelVersion,
+  });
+
+  // Recreate the regular validator the same way installSessionKey did so its
+  // address (the value the kernel stores) matches the installed plugin. We
+  // never sign with this — only the validator identity is needed.
+  const emptySessionAccount = addressToEmptyAccount(sessionKeyAddress);
+  const emptySessionKeySigner = await toECDSASigner({ signer: emptySessionAccount });
+  const permissionPlugin = await toPermissionValidator(publicClient, {
+    entryPoint,
+    signer: emptySessionKeySigner,
+    policies: [toSudoPolicy({})],
+    kernelVersion,
+  });
+
+  // Sudo-only kernel — uninstallPlugin must run under the owner.
+  const account = await createKernelAccount(publicClient, {
+    entryPoint,
+    plugins: { sudo: ecdsaValidator },
+    kernelVersion,
+  });
+
+  let bundlerRpc: string;
+  try {
+    bundlerRpc = getBundlerUrl(chainId);
+  } catch {
+    throw new Error(`Chain ${chainId} is not configured in this build (missing bundler URL)`);
+  }
+  const paymasterUrl = getPaymasterUrl(chainId);
+  const sponsorshipPolicyId = getSponsorshipPolicyId(chainId);
+  const pimlicoClient = paymasterUrl
+    ? createPimlicoClient({
+        transport: http(paymasterUrl, instrumentTransport(paymasterUrl, chainId, 'paymaster')),
+        entryPoint: { address: entryPoint07Address, version: '0.7' },
+      })
+    : null;
+  const policyExt = sponsorshipPolicyId ? { sponsorshipPolicyId } : {};
+
+  const kernelClient = createKernelAccountClient({
+    account,
+    chain,
+    bundlerTransport: http(bundlerRpc, instrumentTransport(bundlerRpc, chainId, 'bundler')),
+    ...(pimlicoClient && {
+      paymaster: {
+        getPaymasterData: (userOp) =>
+          pimlicoClient.getPaymasterData({ ...userOp, ...policyExt }),
+        getPaymasterStubData: (userOp) =>
+          pimlicoClient.getPaymasterStubData({ ...userOp, ...policyExt }),
+      },
+      userOperation: {
+        estimateFeesPerGas: async () => (await pimlicoClient.getUserOperationGasPrice()).fast,
+      },
+    }),
+  });
+
+  log.debug('uninstallSessionKey', { chainId, signerAddress, sessionKeyAddress });
+  return await uninstallPlugin(kernelClient, { plugin: permissionPlugin });
 }

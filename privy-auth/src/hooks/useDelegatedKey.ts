@@ -6,6 +6,7 @@ import {
   encryptBlob,
   decryptBlob,
   installSessionKey,
+  uninstallSessionKey,
   type Permission,
   type DelegationRecord,
 } from '../utils/crypto';
@@ -80,8 +81,12 @@ export function useDelegatedKey(options: {
   privyDid: string; // deterministic derivation input — no user prompt
   /** Chain IDs to install on. Defaults to [getChainId()]. Passing two installs sequentially. */
   chainIds?: number[];
+  /** Backend base URL — when present `removeKey` calls POST /delegation/revoke. */
+  backendUrl?: string;
+  /** Privy bearer token used to authenticate the revoke call. */
+  privyToken?: string;
 }): UseDelegatedKeyResult {
-  const { smartAccountAddress, signerAddress, signerWallet, privyDid } = options;
+  const { smartAccountAddress, signerAddress, signerWallet, privyDid, backendUrl, privyToken } = options;
   const chainIdsToInstall = React.useMemo(
     () => options.chainIds ?? [getChainId()],
     // The default is a fresh array each render — memoize on the JSON form so
@@ -326,13 +331,64 @@ export function useDelegatedKey(options: {
     })();
   }, [installedChainIds, serializedBlobs, installOne, persistAll, buildRecord]);
 
+  // Full revoke: invalidate every onchain spending cap (one sudo userOp per
+  // installed chain), tell the backend to drop redis + token_delegations + flip
+  // userProfile.sessionKeyStatus, then wipe the local keypair. We always clear
+  // local state, even if onchain/backend steps fail — otherwise the user is
+  // stuck with a key they can't refresh from the UI.
   const removeKey = React.useCallback(async () => {
+    const sessionKeyAddress = keypairRef.current?.address ?? null;
+
+    // 1. Onchain — best effort. Each chain is independent. A failure on one
+    //    chain (Privy popup rejected, RPC outage, plugin already uninstalled)
+    //    must not block the rest of the revoke.
+    if (sessionKeyAddress && signerWallet && installedChainIds.length > 0) {
+      try {
+        dispatch({ type: 'PROCESSING', step: 'Revoking onchain caps…' });
+        const rawProvider = await signerWallet.getEthereumProvider();
+        for (const cid of installedChainIds) {
+          try {
+            const txHash = await uninstallSessionKey(
+              rawProvider as Parameters<typeof uninstallSessionKey>[0],
+              signerAddress as `0x${string}`,
+              sessionKeyAddress as `0x${string}`,
+              cid,
+            );
+            log.info('onchain-revoke-succeeded', { chainId: cid, txHash });
+          } catch (err) {
+            log.warn('onchain-revoke-failed', { chainId: cid, err: toErrorMessage(err) });
+          }
+        }
+      } catch (err) {
+        log.warn('onchain-revoke-provider-failed', { err: toErrorMessage(err) });
+      }
+    }
+
+    // 2. Backend — clears redis sessionDelegation, token_delegations, and
+    //    flips userProfile.sessionKeyStatus = REVOKED.
+    if (backendUrl && privyToken) {
+      try {
+        const r = await fetch(`${backendUrl}/delegation/revoke`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${privyToken}` },
+        });
+        if (!r.ok) {
+          log.warn('backend-revoke-failed', { status: r.status });
+        } else {
+          log.info('backend-revoke-succeeded');
+        }
+      } catch (err) {
+        log.warn('backend-revoke-error', { err: toErrorMessage(err) });
+      }
+    }
+
+    // 3. Local — always run.
     await cloudStorageRemoveItem(STORAGE_KEY);
     setSerializedBlobs({});
     setInstalledChainIds([]);
     keypairRef.current = null;
     dispatch({ type: 'ERROR', message: 'Key removed — reload to create a new one.' });
-  }, []);
+  }, [installedChainIds, signerWallet, signerAddress, backendUrl, privyToken]);
 
   return {
     state,

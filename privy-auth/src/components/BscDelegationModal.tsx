@@ -42,7 +42,7 @@ export function BscDelegationModal({
   }, [installed, chainId]);
 
   if (installed) {
-    return <FullScreenSuccess title={`${chainName(chainId)} approved`} />;
+    return <FullScreenSuccess title={`${chainName(chainId)} connected`} />;
   }
 
   if (delegationState?.status === 'error' && stage === 'installing') {
@@ -74,7 +74,7 @@ export function BscDelegationModal({
 
   if (stage === 'installing') {
     const step =
-      delegationState?.status === 'processing' ? delegationState.step : `Approving on ${chainName(chainId)}…`;
+      delegationState?.status === 'processing' ? delegationState.step : `Connecting to ${chainName(chainId)}…`;
     return <FullScreenLoading step={step} />;
   }
 
@@ -84,10 +84,10 @@ export function BscDelegationModal({
         <ShieldIcon size={64} variant="violet" />
         <div className="flex flex-col gap-1.5">
           <p className="text-white font-semibold text-lg">
-            Enable {chainName(chainId)}
+            Connect {chainName(chainId)}
           </p>
           <p className="text-sm text-white/60 leading-relaxed">
-            Approving once for {chainName(chainId)} so the agent can sign trades on this chain on your behalf.
+            Allow the bot to trade on {chainName(chainId)} for you. One quick tap.
           </p>
         </div>
         <div className="flex flex-col gap-3 w-full">
@@ -101,7 +101,7 @@ export function BscDelegationModal({
             }}
             className="w-full py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-semibold text-sm"
           >
-            Approve
+            Allow
           </button>
           <button
             onClick={onCancel}

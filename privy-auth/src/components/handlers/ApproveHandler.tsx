@@ -100,11 +100,11 @@ function SessionKeyApproval({
   }, [delegatedKeyState.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (delegatedKeyState.status === 'error') return <FullScreenError message={delegatedKeyState.message} />;
-  if (delegatedKeyState.status === 'done') return <FullScreenSuccess title="Agent Connected" />;
+  if (delegatedKeyState.status === 'done') return <FullScreenSuccess title="Bot Connected" />;
 
   const step =
     delegatedKeyState.status === 'processing'
       ? delegatedKeyState.step
-      : 'Installing session key…';
+      : 'Setting up your bot…';
   return <FullScreenLoading step={step} />;
 }

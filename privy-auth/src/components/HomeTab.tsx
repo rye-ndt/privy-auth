@@ -51,7 +51,7 @@ export function HomeTab({ delegationState }: { delegationState: DelegationState 
 
       <div className="text-center -mt-1">
         <h1 className="text-2xl font-bold text-white tracking-tight">Aegis</h1>
-        <p className="text-xs text-white/25 mt-0.5 tracking-wide">Onchain AI Agent</p>
+        <p className="text-xs text-white/25 mt-0.5 tracking-wide">Your AI trading bot</p>
       </div>
 
       <AuthBadge authenticated={authenticated} email={user?.google?.email} />
@@ -90,7 +90,7 @@ export function HomeTab({ delegationState }: { delegationState: DelegationState 
         <div className="w-full flex items-center gap-3 bg-violet-500/10 border border-violet-500/20 rounded-xl px-4 py-3">
           <Spinner size="sm" className="border-violet-400/30 border-t-violet-400" />
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-violet-300">Setting up AI Agent</p>
+            <p className="text-xs font-semibold text-violet-300">Setting up your bot</p>
             <p className="text-[11px] text-violet-400/60 truncate mt-0.5">{delegationState.step}</p>
           </div>
         </div>
@@ -116,7 +116,7 @@ function AuthBadge({ authenticated, email }: { authenticated: boolean; email?: s
         : 'bg-red-500/10 border-red-500/20 text-red-400'
     }`}>
       <div className={`w-1.5 h-1.5 rounded-full ${authenticated ? 'bg-emerald-400 shadow-[0_0_6px_#34d399]' : 'bg-red-400'}`} />
-      {authenticated ? 'Authenticated' : 'Not Authenticated'}
+      {authenticated ? 'Signed in' : 'Not signed in'}
       {authenticated && email && <span className="text-white/30 font-normal">· {email}</span>}
     </div>
   );

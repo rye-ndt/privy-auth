@@ -379,7 +379,7 @@ export function SignHandler({
       <FullScreen>
         <div className="flex flex-col items-center gap-4">
           <ShieldIcon size={48} variant="success" />
-          <p className="text-white font-semibold">Transaction sent</p>
+          <p className="text-white font-semibold">Done</p>
         </div>
       </FullScreen>
     );
@@ -398,7 +398,7 @@ export function SignHandler({
         <div className="flex flex-col gap-4 max-w-md w-full">
           <div className="flex flex-col items-center gap-2">
             <div className="text-4xl">⚠️</div>
-            <p className="text-white font-semibold text-lg">Auto-sign failed</p>
+            <p className="text-white font-semibold text-lg">Couldn't complete this for you</p>
             <p className="text-sm text-white/80 text-center">
               {autoSignError.friendly}
             </p>
@@ -447,12 +447,12 @@ export function SignHandler({
           <ShieldIcon size={64} variant="violet" />
           <div className="flex flex-col gap-1.5">
             <p className="text-white font-semibold text-lg">
-              {waiting ? 'Preparing your session key' : 'Signing with your delegated key'}
+              {waiting ? 'Getting ready' : 'Doing this for you'}
             </p>
             <p className="text-sm text-white/60 leading-relaxed">
               {waiting
-                ? 'Unlocking your on-device session key. No popup — this happens silently.'
-                : 'Your delegated key is signing this transaction automatically. You will not need to approve anything.'}
+                ? 'Setting things up. No action needed.'
+                : 'The bot is handling this for you. No action needed.'}
             </p>
           </div>
           <div className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-left">
@@ -463,7 +463,7 @@ export function SignHandler({
           </div>
           <div className="flex items-center gap-2 text-xs text-white/40">
             <Spinner size="xs" />
-            <span>{waiting ? 'Loading key…' : 'Broadcasting transaction…'}</span>
+            <span>{waiting ? 'Getting ready…' : 'Sending…'}</span>
           </div>
         </div>
       </FullScreen>
@@ -474,7 +474,7 @@ export function SignHandler({
     <>
       {autoSignError && (
         <div className="fixed top-2 left-2 right-2 z-50 bg-red-500/10 border border-red-500/30 text-red-200 text-xs p-2 rounded">
-          Auto-sign failed — please approve manually. ({autoSignError.friendly})
+          Couldn't auto-handle this — please confirm manually. ({autoSignError.friendly})
         </div>
       )}
     <SigningRequestModal

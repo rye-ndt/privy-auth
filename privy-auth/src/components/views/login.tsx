@@ -17,7 +17,7 @@ export function LoginView() {
           Aegis
         </h1>
         <p className="text-base text-white/40 text-center max-w-[220px] leading-relaxed">
-          Your secure onchain identity, powered by Google
+          Your secure account, powered by Google
         </p>
       </div>
 
@@ -48,7 +48,7 @@ export function LoginView() {
         </button>
 
         <p className="text-center text-[11px] text-white/20 leading-relaxed px-2">
-          A wallet is created automatically if you don't have one.
+          An account is created for you automatically.
         </p>
       </div>
     </div>
