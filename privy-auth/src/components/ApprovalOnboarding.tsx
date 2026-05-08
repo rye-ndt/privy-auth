@@ -1,7 +1,9 @@
 import React from 'react';
 import type { DelegationState } from '../hooks/useDelegatedKey';
+import type { ApproveRequest } from '../types/miniAppRequest.types';
 import { cloudStorageRemoveItem } from '../utils/telegramStorage';
 import { loggedFetch } from '../utils/loggedFetch';
+import { postResponse } from '../utils/postResponse';
 import { toErrorMessage } from '../utils/toErrorMessage';
 import { ShieldIcon } from './atomics/icons';
 import { Spinner } from './atomics/spinner';
@@ -29,6 +31,12 @@ interface ApprovalOnboardingProps {
   amountRaw?: string;
   /** Chains to fetch approval params for and post grants on. Defaults to onboarding chain ids. */
   chainIds?: number[];
+  /**
+   * When set, after grants succeed the component POSTs `/response` to close
+   * the originating mini-app request. Required for the initial session-key
+   * onboarding flow so the BE persists `userProfile.sessionKeyAddress`.
+   */
+  request?: ApproveRequest;
 }
 
 type PerChainParams = Record<number, ApprovalParam[]>;
@@ -57,6 +65,7 @@ export function ApprovalOnboarding({
   tokenAddress,
   amountRaw,
   chainIds,
+  request,
 }: ApprovalOnboardingProps) {
   const targetChainIds = React.useMemo(
     () => chainIds ?? getOnboardingChainIds(),
@@ -158,6 +167,32 @@ export function ApprovalOnboarding({
           if (!r.ok) throw new Error(`Backend returned ${r.status} for chain ${cid}`);
           log.info('grant-posted', { chainId: cid, count: delegations.length });
         }
+
+        // Initial session-key flow: tell the BE the request is fulfilled so
+        // `applySessionKeyApproval` runs and `userProfile.sessionKeyAddress`
+        // is persisted. Without this the user would be re-prompted on every
+        // subsequent /auth/loginWithPrivy. Re-approval (`aegis_guard`) does
+        // not POST /response here — that path uses the BE's pending-intent
+        // resume which is currently triggered separately.
+        if (request && request.subtype === 'session_key' && delegatedKey.state.status === 'done') {
+          const { record } = delegatedKey.state;
+          await postResponse(backendUrl, {
+            requestId: request.requestId,
+            requestType: 'approve',
+            privyToken: backendJwt,
+            subtype: 'session_key',
+            delegationRecord: {
+              publicKey: record.publicKey,
+              address: record.address,
+              smartAccountAddress: record.smartAccountAddress,
+              signerAddress: record.signerAddress,
+              permissions: record.permissions,
+              grantedAt: record.grantedAt,
+            },
+          });
+          log.info('session-key-response-posted', { requestId: request.requestId });
+        }
+
         setSuccess(true);
         setTimeout(() => window.Telegram?.WebApp?.close(), CLOSE_DELAY_MS);
       } catch (err) {
