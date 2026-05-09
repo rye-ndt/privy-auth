@@ -90,17 +90,23 @@ export function SignHandler({
     return c;
   }, [serializedBlob, serializedBlobs]);
 
-  // Resync when the parent swaps in a different request (distinct requestId).
-  // useState initializer only fires once, so without this the first request
-  // would persist even if the dispatcher routed a new one to us.
+  // Resync only when the parent supplies a new request. Keying off a ref
+  // (instead of putting `currentRequest.requestId` in the deps) prevents the
+  // effect from firing on internal step advances — otherwise the next-step
+  // setCurrentRequest below would immediately revert back to initialRequest.
+  const lastInitialIdRef = React.useRef(initialRequest.requestId);
   React.useEffect(() => {
-    if (initialRequest.requestId !== currentRequest.requestId) {
-      setCurrentRequest(initialRequest);
-      setShowManual(!initialRequest.autoSign);
-      setAutoSignError(null);
-      autoSignAttemptedRef.current = false;
-    }
-  }, [initialRequest, currentRequest.requestId]);
+    if (lastInitialIdRef.current === initialRequest.requestId) return;
+    log.debug('resync-from-parent', {
+      from: lastInitialIdRef.current,
+      to: initialRequest.requestId,
+    });
+    lastInitialIdRef.current = initialRequest.requestId;
+    setCurrentRequest(initialRequest);
+    setShowManual(!initialRequest.autoSign);
+    setAutoSignError(null);
+    autoSignAttemptedRef.current = false;
+  }, [initialRequest]);
 
   const sendReject = React.useCallback(() => {
     postResponse(backendUrl, {
