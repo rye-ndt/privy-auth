@@ -15,6 +15,7 @@ export function ConfigsTab({
   const [showModal, setShowModal] = React.useState(false);
   const [removing, setRemoving] = React.useState(false);
   const [removed, setRemoved] = React.useState(false);
+  const { refetch: refetchDelegations } = useDelegations();
 
   const handleRemove = async () => {
     setRemoving(true);
@@ -22,6 +23,7 @@ export function ConfigsTab({
       await removeKey();
       setRemoved(true);
       setShowModal(false);
+      refetchDelegations();
     } finally {
       setRemoving(false);
     }

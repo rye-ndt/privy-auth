@@ -82,7 +82,8 @@ export default function App() {
   // Auto-unlock or auto-create the session keypair once logged in.
   // - Inside Telegram with no requestId → start() (create if missing).
   // - Anywhere else → unlock() (restore-only, no popup).
-  // Skipped for auth requests: AuthHandler calls start() itself.
+  // Skipped for auth requests: AuthHandler hands off to ApprovalOnboarding,
+  // which calls start() when the user clicks Allow on the cap modal.
   const autoKeyStartedRef = React.useRef(false);
   const isAuthRequest = request?.requestType === 'auth';
   React.useEffect(() => {

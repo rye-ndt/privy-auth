@@ -1,13 +1,15 @@
 import React from 'react';
-import type { AuthRequest } from '../../types/miniAppRequest.types';
+import type { AuthRequest, ApproveRequest } from '../../types/miniAppRequest.types';
 import type { DelegationState } from '../../hooks/useDelegatedKey';
 import { postResponse } from '../../utils/postResponse';
 import { toErrorMessage } from '../../utils/toErrorMessage';
 import { FullScreenError, FullScreenLoading, FullScreenSuccess } from '../atomics/FullScreen';
+import { ApprovalOnboarding } from '../ApprovalOnboarding';
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger('AuthHandler');
 const CLOSE_DELAY_MS = 1500;
+const APPROVE_REQUEST_TTL_SECONDS = 600;
 
 function closeTma() {
   setTimeout(() => window.Telegram?.WebApp?.close(), CLOSE_DELAY_MS);
@@ -15,8 +17,8 @@ function closeTma() {
 
 type Phase =
   | { kind: 'posting_auth' }
-  | { kind: 'installing_key'; approveRequestId: string }
-  | { kind: 'done'; needsApprove: boolean }
+  | { kind: 'approving'; approveRequestId: string }
+  | { kind: 'done' }
   | { kind: 'error'; message: string };
 
 export function AuthHandler({
@@ -34,10 +36,10 @@ export function AuthHandler({
 }) {
   const [phase, setPhase] = React.useState<Phase>({ kind: 'posting_auth' });
   const authPostedRef = React.useRef(false);
-  const approvePostedRef = React.useRef(false);
 
-  // Step 1: post the auth response. Backend may return an approveRequestId for session-key install.
-  // Ref-guarded against StrictMode dev double-fires (effect has [] deps).
+  // BE returns approveRequestId on first login (no sessionKeyAddress on
+  // profile); we hand off to ApprovalOnboarding so the user grants caps
+  // before the key installs. Ref-guarded against StrictMode double-fires.
   React.useEffect(() => {
     if (authPostedRef.current) return;
     authPostedRef.current = true;
@@ -58,10 +60,10 @@ export function AuthHandler({
         log.info('step', { step: 'submitted', requestId: request.requestId });
         const approveRequestId = (body as { approveRequestId?: string } | null)?.approveRequestId;
         if (approveRequestId) {
-          setPhase({ kind: 'installing_key', approveRequestId });
+          setPhase({ kind: 'approving', approveRequestId });
         } else {
           log.info('step', { step: 'succeeded', requestId: request.requestId });
-          setPhase({ kind: 'done', needsApprove: false });
+          setPhase({ kind: 'done' });
           closeTma();
         }
       })
@@ -71,58 +73,34 @@ export function AuthHandler({
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Step 2: once we know approval is needed, kick off key install when idle.
-  React.useEffect(() => {
-    if (phase.kind !== 'installing_key') return;
-    if (delegatedKeyState.status !== 'idle') return;
-    startDelegatedKey();
-  }, [phase.kind, delegatedKeyState.status]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Step 3: key installed → post the approve response, then close.
-  React.useEffect(() => {
-    if (phase.kind !== 'installing_key') return;
-    if (delegatedKeyState.status !== 'done') return;
-    if (approvePostedRef.current) return;
-    approvePostedRef.current = true;
-
-    const { record } = delegatedKeyState;
-    postResponse(backendUrl, {
+  // BE returns only the requestId; the cached request body lives in
+  // miniAppRequestCache. ApprovalOnboarding only reads requestId + subtype,
+  // so a synthesized stub is enough. Memoized so its effects don't remount.
+  const syntheticApproveRequest = React.useMemo<ApproveRequest | null>(() => {
+    if (phase.kind !== 'approving') return null;
+    const now = Math.floor(Date.now() / 1000);
+    return {
       requestId: phase.approveRequestId,
       requestType: 'approve',
-      privyToken,
+      userId: '',
       subtype: 'session_key',
-      delegationRecord: {
-        publicKey: record.publicKey,
-        address: record.address,
-        smartAccountAddress: record.smartAccountAddress,
-        signerAddress: record.signerAddress,
-        permissions: record.permissions,
-        grantedAt: record.grantedAt,
-      },
-    })
-      .then(() => {
-        log.info('step', { step: 'succeeded', requestId: request.requestId });
-        setPhase({ kind: 'done', needsApprove: true });
-        closeTma();
-      })
-      .catch((err: unknown) => {
-        log.error('approve postResponse failed', { requestId: request.requestId, err: toErrorMessage(err) });
-        setPhase({ kind: 'error', message: toErrorMessage(err) });
-      });
-  }, [phase, delegatedKeyState.status]); // eslint-disable-line react-hooks/exhaustive-deps
+      createdAt: now,
+      expiresAt: now + APPROVE_REQUEST_TTL_SECONDS,
+    };
+  }, [phase]);
 
   if (phase.kind === 'error') return <FullScreenError message={phase.message} />;
+  if (phase.kind === 'done') return <FullScreenSuccess title="Connected to Aegis" />;
 
-  if (phase.kind === 'done') {
-    return <FullScreenSuccess title={phase.needsApprove ? 'All Set' : 'Connected to Aegis'} />;
+  if (phase.kind === 'approving' && syntheticApproveRequest) {
+    return (
+      <ApprovalOnboarding
+        backendJwt={privyToken}
+        delegatedKey={{ state: delegatedKeyState, start: startDelegatedKey }}
+        request={syntheticApproveRequest}
+      />
+    );
   }
 
-  const step =
-    delegatedKeyState.status === 'processing'
-      ? delegatedKeyState.step
-      : phase.kind === 'installing_key'
-        ? 'Setting up your bot…'
-        : null;
-
-  return <FullScreenLoading step={step} />;
+  return <FullScreenLoading step={null} />;
 }

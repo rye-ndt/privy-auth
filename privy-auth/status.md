@@ -1,5 +1,60 @@
 # Privy Auth Mini-App — Status Log
 
+## First-login cap approval (no more silent install) — 2026-05-09
+
+**What** — `AuthHandler` no longer silently installs the session key after auth.
+When BE returns an `approveRequestId` (set when `userProfile.sessionKeyAddress`
+is null on `POST /auth/loginWithPrivy`), `AuthHandler` synthesizes a minimal
+`ApproveRequest` (`subtype: 'session_key'`, the BE's requestId, no
+token/amount filters) and renders `<ApprovalOnboarding>` directly.
+`ApprovalOnboarding` then drives: install on Allow → `POST /delegation/grant`
+per chain → `POST /response` with the delegationRecord. The
+`installing_key` phase + manual `/response` post that AuthHandler used to do
+are gone.
+
+**Why** — previously the BE issued a session_key approval request at first
+login but the FE bypassed the modal and silently installed. Result: caps were
+never seeded; the *first* user transaction always tripped `aegisGuardInterceptor`
+and showed the cap modal mid-trade. After this change, USDC + USDT + native
+caps are pre-seeded at login (whatever `GET /delegation/approval-params`
+returns when called without filters), so the first stable trade auto-runs
+without a modal.
+
+**Non-stables stay reapproval-driven** — `aegisGuardInterceptor` still mints
+an `aegis_guard` reapproval at `intentRaw × NON_STABLE_REAPPROVAL_MULTIPLIER`
+(default 10) the first time a user touches a non-stable token. This is the
+"no stuck case" safety net: any uncovered token routes to a modal, never a
+silent failure. The onchain validator is still `toSudoPolicy({})` so caps are
+purely a BE/UX consent record (BLOCKER-1 in `be/STATUS.md` covers replacing
+sudo with `toSpendingLimitPolicy`).
+
+**Invariant for handlers** — when a request type can carry a follow-up
+approveRequestId (today: only `auth`), the handler must not install the
+session key without a modal. Use `<ApprovalOnboarding>` (or a synthesized
+ApproveRequest passed to it) so the user sees and consents to the caps
+before `POST /delegation/grant`.
+
+## Delegations cache invalidation on disconnect — 2026-05-09
+
+**What** — `useFetch` now returns a stable `refetch()` callback (driven by the
+existing internal `tick` state), and `Resource<T>` in `useAppData.tsx` carries
+it through context. `ConfigsTab.handleRemove` calls `refetchDelegations()`
+after `removeKey()` resolves, so the `PermissionsSection` ("What the bot can
+do") immediately re-pulls `GET /delegation/grant` and renders the empty state
+instead of stale grant rows.
+
+**Why** — the 2026-05-08 revoke rewrite cleaned up onchain + BE state but the
+FE delegations cache was only invalidated on `visibilitychange` (via
+`refetchOnVisible`). Result: BE had already deleted every `token_delegations`
+row, but the section kept showing the old caps until the mini-app lost +
+regained focus. Explicit `refetch()` after disconnect closes that gap without
+relying on focus.
+
+**Convention** — `useFetch` consumers can now call `resource.refetch()` to
+force a re-pull (no-op when `enabled` is false or `url` is null). Use this
+for state the BE owns that the FE just mutated (disconnect, grant updates).
+Don't poll with it — `refetchOnVisible` covers focus-driven freshness.
+
 ## Revoke flow rewrite — 2026-05-08
 
 **What** — `useDelegatedKey.removeKey` now performs a full revoke instead of

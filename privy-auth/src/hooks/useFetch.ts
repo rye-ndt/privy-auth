@@ -13,7 +13,7 @@ export function useFetch<T>(
     enabled?: boolean;
     refetchOnVisible?: boolean;
   } = {},
-): { data: T | null; loading: boolean; error: string | null } {
+): { data: T | null; loading: boolean; error: string | null; refetch: () => void } {
   const {
     headers,
     transform,
@@ -65,5 +65,10 @@ export function useFetch<T>(
     return () => document.removeEventListener('visibilitychange', handler);
   }, [refetchOnVisible, enabled, url]);
 
-  return { data, loading, error };
+  const refetch = React.useCallback(() => {
+    if (!enabled || !url) return;
+    setTick((n) => n + 1);
+  }, [enabled, url]);
+
+  return { data, loading, error, refetch };
 }

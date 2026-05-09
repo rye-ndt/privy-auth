@@ -42,7 +42,7 @@ export type UserProfile = {
   pendingFlushed: number;
 };
 
-type Resource<T> = { data: T | null; loading: boolean; error: string | null };
+type Resource<T> = { data: T | null; loading: boolean; error: string | null; refetch: () => void };
 
 type AppData = {
   portfolio: Resource<PortfolioToken[]>;
