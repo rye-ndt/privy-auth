@@ -17,12 +17,23 @@ export function readStartParam(): string | null {
 export function parseDeepLink(): DeepLinkAction | null {
   const raw = readStartParam();
   if (!raw) return null;
-  const idx = raw.indexOf(':');
-  if (idx <= 0) return null;
-  const verb = raw.slice(0, idx);
-  const id = raw.slice(idx + 1);
-  if (!id) return null;
-  if (verb === 'place_bet') return { kind: 'place_bet', intentId: id };
-  if (verb === 'close_position') return { kind: 'close_position', positionId: id };
+  const parts = raw.split(':');
+  if (parts.length < 2) return null;
+  const [verb, ...rest] = parts;
+  if (verb === 'place_bet') {
+    // Paper-bet contract: `place_bet:<findingId>:<A|B>`. The middle segment is
+    // a UUID; the trailing segment encodes which SideThesis the user picked.
+    if (rest.length < 2) return null;
+    const findingId = rest[0]!;
+    const side = rest[1];
+    if (!findingId) return null;
+    if (side !== 'A' && side !== 'B') return null;
+    return { kind: 'place_bet', findingId, side };
+  }
+  if (verb === 'close_position') {
+    const positionId = rest.join(':');
+    if (!positionId) return null;
+    return { kind: 'close_position', positionId };
+  }
   return null;
 }

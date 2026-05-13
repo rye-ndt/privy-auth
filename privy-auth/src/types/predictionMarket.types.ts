@@ -169,6 +169,67 @@ export interface SellOrderRequest {
   livePriceBps: number;
 }
 
+/**
+ * Positional side selector carried by the `place_bet:findingId:A|B` deep-link.
+ * Backend translates A/B → YES/NO of the corresponding SideThesis when
+ * placing the paper bet.
+ */
+export type PaperBetSideSelector = 'A' | 'B';
+
 export type DeepLinkAction =
-  | { kind: 'place_bet'; intentId: string }
+  | { kind: 'place_bet'; findingId: string; side: PaperBetSideSelector }
   | { kind: 'close_position'; positionId: string };
+
+// ── Paper bets (evaluation mode) ────────────────────────────────────────────
+// Mirror of `be/src/use-cases/interface/predictionMarket/PaperBetTypes.ts`.
+
+export type PaperBetSide = 'YES' | 'NO';
+export type PaperBetStatus = 'open' | 'resolved' | 'voided';
+export type PaperDetectorSource = 'deterministic' | 'llm';
+
+export interface PaperBet {
+  id: string;
+  userId: string;
+  findingId: string;
+  clusterId: string;
+  marketId: string;
+  subject: string | null;
+  side: PaperBetSide;
+  stakeUsdcCents: number;
+  entryPriceBps: number;
+  /** Wire form: BigInt serialized as decimal string. Parse with `BigInt(...)`. */
+  sharesE6: string;
+  detectorSource: PaperDetectorSource;
+  status: PaperBetStatus;
+  outcome: PaperBetSide | null;
+  payoutUsdcCents: number | null;
+  realizedPnlUsdcCents: number | null;
+  entryAt: string;
+  resolvedAt: string | null;
+}
+
+export interface PaperBetPreview {
+  findingId: string;
+  marketId: string;
+  side: PaperBetSide;
+  sideLabel: string;
+  rationale: string;
+  whyAnomalous: string;
+  priceBps: number;
+  minStakeUsdcCents: number;
+  maxStakeUsdcCents: number;
+}
+
+export interface PerformanceBucket {
+  key: string;
+  betCount: number;
+  totalStakeUsdcCents: number;
+  totalPayoutUsdcCents: number;
+  totalPnlUsdcCents: number;
+  wins: number;
+  losses: number;
+  winRateBps: number;
+  roiBps: number;
+  medianStakeUsdcCents: number;
+  medianPnlUsdcCents: number;
+}

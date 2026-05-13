@@ -10,7 +10,7 @@ import { SignHandler } from './components/handlers/SignHandler';
 import { YieldDepositHandler } from './components/handlers/YieldDepositHandler';
 import { ApproveHandler } from './components/handlers/ApproveHandler';
 import { OnrampHandler } from './components/handlers/OnrampHandler';
-import { PlaceBetHandler } from './components/handlers/PlaceBetHandler';
+import { PaperBetHandler } from './components/handlers/PaperBetHandler';
 import { ClosePositionHandler } from './components/handlers/ClosePositionHandler';
 import { StatusView } from './components/StatusView';
 import { usePrivyToken } from './hooks/privy';
@@ -72,7 +72,9 @@ export default function App() {
   });
 
   const { requestId, request, loading: requestLoading, error: requestError } = useRequest(backendUrl);
-  const deepLink = parseDeepLink();
+  // Deep-link payload (Telegram start_param / URL `startapp`) is immutable for
+  // the app's lifetime — parse once instead of on every render.
+  const deepLink = React.useMemo(() => parseDeepLink(), []);
 
   // Log request load errors.
   React.useEffect(() => {
@@ -110,29 +112,27 @@ export default function App() {
     } else {
       content = <LoginView />;
     }
+  } else if (deepLink && deepLink.kind === 'place_bet') {
+    // Paper-bet flow is pure HTTP — no session-key/SCA required, so we mount
+    // immediately instead of gating on `delegatedKey.state.status === 'done'`.
+    content = (
+      <PaperBetHandler
+        findingId={deepLink.findingId}
+        side={deepLink.side}
+        privyToken={privyToken}
+        backendUrl={backendUrl}
+      />
+    );
   } else if (deepLink && delegatedKey.state.status === 'done') {
-    if (deepLink.kind === 'place_bet') {
-      content = (
-        <PlaceBetHandler
-          intentId={deepLink.intentId}
-          privyToken={privyToken}
-          privyDid={user?.id ?? ''}
-          backendUrl={backendUrl}
-          installedChainIds={delegatedKey.installedChainIds}
-          installOnChain={delegatedKey.installOnChain}
-        />
-      );
-    } else {
-      content = (
-        <ClosePositionHandler
-          positionId={deepLink.positionId}
-          privyToken={privyToken}
-          privyDid={user?.id ?? ''}
-          backendUrl={backendUrl}
-          scaAddress={smartAddress as `0x${string}`}
-        />
-      );
-    }
+    content = (
+      <ClosePositionHandler
+        positionId={deepLink.positionId}
+        privyToken={privyToken}
+        privyDid={user?.id ?? ''}
+        backendUrl={backendUrl}
+        scaAddress={smartAddress as `0x${string}`}
+      />
+    );
   } else if (deepLink) {
     content = <LoadingSpinner />;
   } else if (!requestId) {

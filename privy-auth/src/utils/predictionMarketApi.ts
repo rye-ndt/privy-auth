@@ -13,6 +13,11 @@ import type {
   DriftDecisionResponse,
   IntentDetail,
   OrderbookTop,
+  PaperBet,
+  PaperBetPreview,
+  PaperBetSideSelector,
+  PaperBetStatus,
+  PerformanceBucket,
   PlaceOrderRequest,
   PositionRow,
   PredictionMarketState,
@@ -163,6 +168,56 @@ export const pmApi = {
       `${ctx.backendUrl}/predictionMarket/position/${positionId}/finalize`,
       ctx.privyToken,
       body,
+    );
+  },
+
+  // ── Paper-bet (evaluation mode) helpers ────────────────────────────────
+  // These call the BE routes added in Part 2 + the preview route in Part 4.
+  // Wire-side here is positional `A|B` because the broadcast deep-link uses
+  // that contract; the BE translates to YES/NO of the matching SideThesis.
+
+  paperBetPreview(
+    ctx: Ctx,
+    args: { findingId: string; side: PaperBetSideSelector },
+  ): Promise<PaperBetPreview> {
+    const qs = new URLSearchParams({ findingId: args.findingId, side: args.side });
+    return getJson(`${ctx.backendUrl}/predictionMarket/paperBetPreview?${qs.toString()}`, ctx.privyToken);
+  },
+  placePaperBet(
+    ctx: Ctx,
+    body: { findingId: string; side: PaperBetSideSelector; stakeUsdcCents: number },
+  ): Promise<{ paperBet: PaperBet }> {
+    return postJson(`${ctx.backendUrl}/predictionMarket/paperBet`, ctx.privyToken, body);
+  },
+  paperBets(
+    ctx: Ctx,
+    opts: { status?: PaperBetStatus; limit?: number } = {},
+  ): Promise<{ paperBets: PaperBet[] }> {
+    const qs = new URLSearchParams();
+    if (opts.status) qs.set('status', opts.status);
+    if (opts.limit != null) qs.set('limit', String(opts.limit));
+    const tail = qs.toString();
+    return getJson(
+      `${ctx.backendUrl}/predictionMarket/paperBets${tail ? `?${tail}` : ''}`,
+      ctx.privyToken,
+    );
+  },
+  paperPerformance(
+    ctx: Ctx,
+    opts: {
+      groupBy?: 'overall' | 'subject' | 'clusterId' | 'detectorSource';
+      status?: PaperBetStatus;
+      since?: string;
+    } = {},
+  ): Promise<{ buckets: PerformanceBucket[]; since: string }> {
+    const qs = new URLSearchParams();
+    if (opts.groupBy) qs.set('groupBy', opts.groupBy);
+    if (opts.status) qs.set('status', opts.status);
+    if (opts.since) qs.set('since', opts.since);
+    const tail = qs.toString();
+    return getJson(
+      `${ctx.backendUrl}/predictionMarket/paperPerformance${tail ? `?${tail}` : ''}`,
+      ctx.privyToken,
     );
   },
 };

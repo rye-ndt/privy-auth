@@ -1,5 +1,55 @@
 # Privy Auth Mini-App — Status Log
 
+## Prediction markets — paper-bet mode — 2026-05-11
+
+**What** — `place_bet:findingId:A|B` deep-link now mounts `PaperBetHandler`
+(`src/components/handlers/PaperBetHandler.tsx`) instead of `PlaceBetHandler`.
+The new handler is a pure HTTP flow: `pmApi.paperBetPreview` → amount input →
+recap → `pmApi.placePaperBet` → success receipt → single `WebApp.close()` after
+3s. No SCA derivation, no Kernel install, no Privy session-key crypto, no
+bridge, no CLOB signing — `polygonEoaClient`, `polymarket.ts`, and
+`createSessionKeyClient` are not imported by this handler. It also does **not**
+gate on `delegatedKey.state.status === 'done'` (the on-chain `place_bet`
+mount used to) — paper bets need only the privy bearer.
+
+**Why** — paper-bet mode measures model profitability before real money
+moves on-chain; the broadcast contract (`place_bet:<findingId>:<A|B>`) is
+preserved end-to-end so BE can swap destinations without touching FE. See
+`fe/privy-auth/constructions/2026-05-11-prediction-markets-paper-bets-part4.md`.
+
+**Deep-link parser change** — `parseDeepLink()` and `DeepLinkAction` now treat
+`place_bet:` as `{ findingId, side: 'A'|'B' }` (was `{ intentId }`). Any new
+broadcast emitter that still sends the single-id form will produce `null` and
+silently fall back to the no-deeplink branch — be aware when adding emitters.
+
+**API additions** (`utils/predictionMarketApi.ts`):
+- `pmApi.paperBetPreview(ctx, { findingId, side })` — `GET
+  /predictionMarket/paperBetPreview`. **Source of truth** for marketId + price
+  + stake bounds; do not duplicate the side→outcome mapping on the FE.
+- `pmApi.placePaperBet(ctx, body)` — `POST /predictionMarket/paperBet`.
+- `pmApi.paperBets(ctx, opts)` / `pmApi.paperPerformance(ctx, opts)` — for the
+  follow-up "my paper performance" view (not implemented in this part).
+
+**Types** — `types/predictionMarket.types.ts` got `PaperBet`, `PaperBetSide`,
+`PaperBetStatus`, `PaperBetPreview`, `PaperDetectorSource`,
+`PerformanceBucket`, `PaperBetSideSelector` (positional A|B for the deep-link
+contract). `PaperBet.sharesE6` is a decimal-string on the wire (BE serializes
+BigInt that way); FE parses with `BigInt(...)`.
+
+**`PlaceBetHandler.tsx` is dormant** — kept on disk for reference / future
+re-enable. Not imported anywhere now.
+
+**New convention introduced** — when a deep-link's destination is pure HTTP
+(no session key, no SCA), mount it ahead of the `delegatedKey.state.status ===
+'done'` gate. The gate exists for handlers that need to sign — paper-bet
+doesn't.
+
+**Tests deferred** — the construction doc plans `PaperBetHandler.test.tsx` and
+`predictionMarketApi.test.ts`. FE currently has no vitest/jest/jsdom infra
+(no `test` script in `package.json`, no `*.test.*` files outside
+`node_modules`). Adding the infra is out of scope for this part; the test
+files should be written when FE test infra lands.
+
 ## First-login cap approval (no more silent install) — 2026-05-09
 
 **What** — `AuthHandler` no longer silently installs the session key after auth.
