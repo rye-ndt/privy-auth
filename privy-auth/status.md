@@ -13,55 +13,24 @@
 
 **Side-effect note** — `useDelegatedKey.removeKey` now requires `privyToken` to attempt onchain revoke; without a token we skip the onchain step entirely (BE clear + local wipe still run). This is the correct behaviour — without a token the bundler proxy would 401 anyway — but it does mean the previous "best-effort onchain revoke even if token missing" path is gone. In practice `removeKey` is always called from a logged-in session, so the token is present.
 
-## Prediction markets — paper-bet mode — 2026-05-11
+## Prediction markets — paper-bet mode REMOVED — 2026-05-15
 
-**What** — `place_bet:findingId:A|B` deep-link now mounts `PaperBetHandler`
-(`src/components/handlers/PaperBetHandler.tsx`) instead of `PlaceBetHandler`.
-The new handler is a pure HTTP flow: `pmApi.paperBetPreview` → amount input →
-recap → `pmApi.placePaperBet` → success receipt → single `WebApp.close()` after
-3s. No SCA derivation, no Kernel install, no Privy session-key crypto, no
-bridge, no CLOB signing — `polygonEoaClient`, `polymarket.ts`, and
-`createSessionKeyClient` are not imported by this handler. It also does **not**
-gate on `delegatedKey.state.status === 'done'` (the on-chain `place_bet`
-mount used to) — paper bets need only the privy bearer.
+**What** — Paper-bet UX is gone. Deleted `PaperBetHandler.tsx`, the
+`pmApi.paperBet*` / `pmApi.paperPerformance` methods, all paper-bet types
+(`PaperBet`, `PaperBetPreview`, `PaperBetSide`, `PaperBetStatus`,
+`PaperDetectorSource`, `PaperBetSideSelector`, `PerformanceBucket`), the
+`place_bet:` branch in `parseDeepLink()`, and the `place_bet` mount branch in
+`App.tsx`. `DeepLinkAction` now contains only `close_position`.
 
-**Why** — paper-bet mode measures model profitability before real money
-moves on-chain; the broadcast contract (`place_bet:<findingId>:<A|B>`) is
-preserved end-to-end so BE can swap destinations without touching FE. See
-`fe/privy-auth/constructions/2026-05-11-prediction-markets-paper-bets-part4.md`.
+**Why** — backend is moving to real-money positions next (see
+`be/STATUS.md` 2026-05-15 entry). The simulated path was added as an
+evaluation harness; with no production users on it, keeping it doubled the
+surface area for FE types, deep-link parsing, and API client without payoff.
 
-**Deep-link parser change** — `parseDeepLink()` and `DeepLinkAction` now treat
-`place_bet:` as `{ findingId, side: 'A'|'B' }` (was `{ intentId }`). Any new
-broadcast emitter that still sends the single-id form will produce `null` and
-silently fall back to the no-deeplink branch — be aware when adding emitters.
-
-**API additions** (`utils/predictionMarketApi.ts`):
-- `pmApi.paperBetPreview(ctx, { findingId, side })` — `GET
-  /predictionMarket/paperBetPreview`. **Source of truth** for marketId + price
-  + stake bounds; do not duplicate the side→outcome mapping on the FE.
-- `pmApi.placePaperBet(ctx, body)` — `POST /predictionMarket/paperBet`.
-- `pmApi.paperBets(ctx, opts)` / `pmApi.paperPerformance(ctx, opts)` — for the
-  follow-up "my paper performance" view (not implemented in this part).
-
-**Types** — `types/predictionMarket.types.ts` got `PaperBet`, `PaperBetSide`,
-`PaperBetStatus`, `PaperBetPreview`, `PaperDetectorSource`,
-`PerformanceBucket`, `PaperBetSideSelector` (positional A|B for the deep-link
-contract). `PaperBet.sharesE6` is a decimal-string on the wire (BE serializes
-BigInt that way); FE parses with `BigInt(...)`.
-
-**`PlaceBetHandler.tsx` is dormant** — kept on disk for reference / future
-re-enable. Not imported anywhere now.
-
-**New convention introduced** — when a deep-link's destination is pure HTTP
-(no session key, no SCA), mount it ahead of the `delegatedKey.state.status ===
-'done'` gate. The gate exists for handlers that need to sign — paper-bet
-doesn't.
-
-**Tests deferred** — the construction doc plans `PaperBetHandler.test.tsx` and
-`predictionMarketApi.test.ts`. FE currently has no vitest/jest/jsdom infra
-(no `test` script in `package.json`, no `*.test.*` files outside
-`node_modules`). Adding the infra is out of scope for this part; the test
-files should be written when FE test infra lands.
+**Follow-up** — when wiring real-money UI, re-add a `place_bet` kind to
+`DeepLinkAction`, restore the verb in `parseDeepLink()`, and mount the
+real-bet handler in `App.tsx`. The broadcast contract from BE is still
+`place_bet:<findingId>:A|B` (verified — only the FE consumer was removed).
 
 ## First-login cap approval (no more silent install) — 2026-05-09
 

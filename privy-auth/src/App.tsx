@@ -10,7 +10,6 @@ import { SignHandler } from './components/handlers/SignHandler';
 import { YieldDepositHandler } from './components/handlers/YieldDepositHandler';
 import { ApproveHandler } from './components/handlers/ApproveHandler';
 import { OnrampHandler } from './components/handlers/OnrampHandler';
-import { PaperBetHandler } from './components/handlers/PaperBetHandler';
 import { ClosePositionHandler } from './components/handlers/ClosePositionHandler';
 import { StatusView } from './components/StatusView';
 import { usePrivyToken } from './hooks/privy';
@@ -112,17 +111,6 @@ export default function App() {
     } else {
       content = <LoginView />;
     }
-  } else if (deepLink && deepLink.kind === 'place_bet') {
-    // Paper-bet flow is pure HTTP — no session-key/SCA required, so we mount
-    // immediately instead of gating on `delegatedKey.state.status === 'done'`.
-    content = (
-      <PaperBetHandler
-        findingId={deepLink.findingId}
-        side={deepLink.side}
-        privyToken={privyToken}
-        backendUrl={backendUrl}
-      />
-    );
   } else if (deepLink && delegatedKey.state.status === 'done') {
     content = (
       <ClosePositionHandler

@@ -20,16 +20,6 @@ export function parseDeepLink(): DeepLinkAction | null {
   const parts = raw.split(':');
   if (parts.length < 2) return null;
   const [verb, ...rest] = parts;
-  if (verb === 'place_bet') {
-    // Paper-bet contract: `place_bet:<findingId>:<A|B>`. The middle segment is
-    // a UUID; the trailing segment encodes which SideThesis the user picked.
-    if (rest.length < 2) return null;
-    const findingId = rest[0]!;
-    const side = rest[1];
-    if (!findingId) return null;
-    if (side !== 'A' && side !== 'B') return null;
-    return { kind: 'place_bet', findingId, side };
-  }
   if (verb === 'close_position') {
     const positionId = rest.join(':');
     if (!positionId) return null;
