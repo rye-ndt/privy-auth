@@ -342,7 +342,7 @@ export function useDelegatedKey(options: {
     // 1. Onchain — best effort. Each chain is independent. A failure on one
     //    chain (Privy popup rejected, RPC outage, plugin already uninstalled)
     //    must not block the rest of the revoke.
-    if (sessionKeyAddress && signerWallet && installedChainIds.length > 0) {
+    if (sessionKeyAddress && signerWallet && installedChainIds.length > 0 && privyToken) {
       try {
         dispatch({ type: 'PROCESSING', step: 'Revoking onchain caps…' });
         const rawProvider = await signerWallet.getEthereumProvider();
@@ -353,6 +353,7 @@ export function useDelegatedKey(options: {
               signerAddress as `0x${string}`,
               sessionKeyAddress as `0x${string}`,
               cid,
+              privyToken,
             );
             log.info('onchain-revoke-succeeded', { chainId: cid, txHash });
           } catch (err) {

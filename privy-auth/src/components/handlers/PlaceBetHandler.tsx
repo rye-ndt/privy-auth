@@ -460,7 +460,7 @@ export function PlaceBetHandler(props: Props) {
     value: bigint,
     data: `0x${string}`,
   ): Promise<string> => {
-    const sessionClient = await createSessionKeyClient(getKernelBlob(eoa, chainId), chainId);
+    const sessionClient = await createSessionKeyClient(getKernelBlob(eoa, chainId), chainId, privyToken);
     return sessionClient.sendTransaction({ to, value, data, account: sessionClient.account!, chain: null });
   };
 

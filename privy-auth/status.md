@@ -1,5 +1,18 @@
 # Privy Auth Mini-App — Status Log
 
+## AA bundler proxy — FE switched to BE-proxied bundler — 2026-05-15
+
+**What** — Bundler RPCs no longer go FE → pimlico directly. `getBundlerUrl(chainId)` in `utils/chainConfig.ts` now returns `${VITE_BACKEND_URL}/aa/bundler/<chainId>`, and every kernel-client builder (`createSessionKeyClient`, `createSudoClient`, `uninstallSessionKey`) takes `privyToken` as the **last positional arg** and registers a per-host `Authorization: Bearer <token>` injector via `rpcTrace.registerHeaderInjector` before building the viem `http()` bundler transport. `CHAIN_REGISTRY` lost the `bundlerUrl` field; the per-chain `VITE_*PIMLICO_BUNDLER_URL` env vars + the `vite-env.d.ts` declaration are gone. Paymaster path is unchanged (still direct to pimlico).
+
+**Why** — `eth_sendUserOperation` was failing with `TypeError: Load failed` in Telegram Desktop's macOS WKWebView whenever the userOp body crossed ~8 KB (full session-key signature). Same-origin BE proxy + Node fetch sidesteps the WKWebView quirk and gets the pimlico API key out of the FE bundle. See `constructions/2026-05-15-bundler-proxy-fe.md` (paired with `be/constructions/2026-05-15-bundler-proxy-be.md`).
+
+**New conventions**
+- Anywhere we build a kernel client (sudo or session) or call `uninstallSessionKey`, pass `privyToken` as the last positional arg. Adding a new chain on the FE means: register it in `CHAIN_REGISTRY` and ensure the BE has `PIMLICO_BUNDLER_URL_<chainId>` set — the FE never holds bundler creds.
+- `rpcTrace.ts` now exposes `registerHeaderInjector(url, () => headers)`. The injector is called per request so short-lived tokens can rotate without re-registering. Use this for any future host that needs auth — do not introduce a parallel fetch wrapper.
+- Bundler URL is computed (not env-read), so the old "missing bundler URL for chain X" build-time error is replaced by a runtime 503 from the BE if `PIMLICO_BUNDLER_URL_<chainId>` is unset on the BE side. Surfaces normally through `interpretSignError`.
+
+**Side-effect note** — `useDelegatedKey.removeKey` now requires `privyToken` to attempt onchain revoke; without a token we skip the onchain step entirely (BE clear + local wipe still run). This is the correct behaviour — without a token the bundler proxy would 401 anyway — but it does mean the previous "best-effort onchain revoke even if token missing" path is gone. In practice `removeKey` is always called from a logged-in session, so the token is present.
+
 ## Prediction markets — paper-bet mode — 2026-05-11
 
 **What** — `place_bet:findingId:A|B` deep-link now mounts `PaperBetHandler`

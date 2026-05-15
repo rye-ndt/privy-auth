@@ -16,7 +16,7 @@ import {
   getSponsorshipPolicyId,
 } from './chainConfig';
 import { createLogger } from './logger';
-import { instrumentTransport } from './rpcTrace';
+import { instrumentTransport, registerHeaderInjector, setBundlerAuthToken, bundlerAuthHeader } from './rpcTrace';
 
 const log = createLogger('createSudoClient');
 
@@ -24,10 +24,13 @@ export async function createSudoClient(
   provider: EIP1193Provider,
   signerAddress: `0x${string}`,
   chainId: number,
+  privyToken: string,
 ): Promise<KernelAccountClient> {
   const chain = getChainById(chainId);
   const rpcUrl = getRpcUrlById(chainId);
   const bundlerRpc = getBundlerUrl(chainId);
+  setBundlerAuthToken(privyToken);
+  registerHeaderInjector(bundlerRpc, bundlerAuthHeader);
   const paymasterUrl = getPaymasterUrl(chainId);
   const sponsorshipPolicyId = getSponsorshipPolicyId(chainId);
 

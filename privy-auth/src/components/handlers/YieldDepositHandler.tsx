@@ -12,6 +12,7 @@ import { Spinner } from '../atomics/spinner';
 import { ShieldIcon } from '../atomics/icons';
 import { createLogger } from '../../utils/logger';
 import { getChainId } from '../../utils/chainConfig';
+import { setBundlerAuthToken } from '../../utils/rpcTrace';
 
 const log = createLogger('YieldDepositHandler');
 
@@ -38,6 +39,8 @@ export function YieldDepositHandler({
   const sudoClientByChainRef = React.useRef<Map<number, KernelAccountClient>>(new Map());
   const reqChainId = request.chainId ?? getChainId();
 
+  React.useEffect(() => { setBundlerAuthToken(privyToken); }, [privyToken]);
+
   const getSudoClient = React.useCallback(async (chainId: number): Promise<KernelAccountClient> => {
     const cached = sudoClientByChainRef.current.get(chainId);
     if (cached) return cached;
@@ -47,10 +50,11 @@ export function YieldDepositHandler({
       provider,
       embedded.address as `0x${string}`,
       chainId,
+      privyToken,
     );
     sudoClientByChainRef.current.set(chainId, c);
     return c;
-  }, [embedded]);
+  }, [embedded, privyToken]);
 
   const [phase, setPhase] = React.useState<Phase>(request.autoSign ? 'signing' : 'presign');
   const [error, setError] = React.useState<string | null>(null);
@@ -120,7 +124,7 @@ export function YieldDepositHandler({
       try {
         let sc = sessionClientRef.current;
         if (!sc) {
-          sc = await createSessionKeyClient(serializedBlob, reqChainId);
+          sc = await createSessionKeyClient(serializedBlob, reqChainId, privyToken);
           sessionClientRef.current = sc;
         }
         await executeSign(sc);

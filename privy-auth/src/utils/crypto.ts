@@ -12,7 +12,7 @@ import { toSudoPolicy } from '@zerodev/permissions/policies';
 import type { EIP1193Provider } from 'viem';
 import type { KernelAccountClient } from '@zerodev/sdk';
 import { createLogger } from './logger';
-import { instrumentTransport } from './rpcTrace';
+import { instrumentTransport, registerHeaderInjector, setBundlerAuthToken, bundlerAuthHeader } from './rpcTrace';
 import {
   getChainById,
   getChainId,
@@ -193,6 +193,7 @@ export async function installSessionKey(
 export async function createSessionKeyClient(
   serializedBlob: string,
   chainId: number,
+  privyToken: string,
 ): Promise<KernelAccountClient> {
   // Fail fast if this build wasn't configured with a bundler URL for the requested chain.
   let bundlerRpc: string;
@@ -201,6 +202,11 @@ export async function createSessionKeyClient(
   } catch {
     throw new Error(`Chain ${chainId} is not configured in this build (missing bundler URL)`);
   }
+  // Bundler is BE-proxied — `bundlerAuthHeader` reads the latest token from
+  // module state, so cached KernelAccountClients pick up a rotated Privy token
+  // without being recreated.
+  setBundlerAuthToken(privyToken);
+  registerHeaderInjector(bundlerRpc, bundlerAuthHeader);
   const paymasterUrl = getPaymasterUrl(chainId);
   const sponsorshipPolicyId = getSponsorshipPolicyId(chainId);
 
@@ -277,6 +283,7 @@ export async function uninstallSessionKey(
   signerAddress: `0x${string}`,
   sessionKeyAddress: `0x${string}`,
   chainId: number,
+  privyToken: string,
 ): Promise<`0x${string}`> {
   const chain = getChainById(chainId);
   const rpcUrl = getRpcUrlById(chainId);
@@ -323,6 +330,8 @@ export async function uninstallSessionKey(
   } catch {
     throw new Error(`Chain ${chainId} is not configured in this build (missing bundler URL)`);
   }
+  setBundlerAuthToken(privyToken);
+  registerHeaderInjector(bundlerRpc, bundlerAuthHeader);
   const paymasterUrl = getPaymasterUrl(chainId);
   const sponsorshipPolicyId = getSponsorshipPolicyId(chainId);
   const pimlicoClient = paymasterUrl

@@ -17,7 +17,7 @@ import { interpretSignError, type InterpretedError } from '../../utils/interpret
 import { findRecentBroadcast, trackInFlightBroadcast } from '../../utils/recentBroadcasts';
 import { getChainId, getPaymasterUrl, getBundlerUrl, getRpcUrlById, getSponsorshipPolicyId } from '../../utils/chainConfig';
 import { extractViemErrorContext, buildErrorRaw } from '../../utils/extractViemErrorContext';
-import { getLastRpc, summarizeLastRpc } from '../../utils/rpcTrace';
+import { getLastRpc, summarizeLastRpc, setBundlerAuthToken } from '../../utils/rpcTrace';
 
 const log = createLogger('SignHandler');
 
@@ -54,6 +54,10 @@ export function SignHandler({
   const embedded = wallets.find((w) => w.walletClientType === 'privy');
   const sudoClientByChainRef = React.useRef<Map<number, KernelAccountClient>>(new Map());
 
+  // Cached kernel clients carry their bundler injector across token rotations;
+  // push the latest token into module state so the next bundler request uses it.
+  React.useEffect(() => { setBundlerAuthToken(privyToken); }, [privyToken]);
+
   const getSudoClient = React.useCallback(async (chainId: number): Promise<KernelAccountClient> => {
     const cached = sudoClientByChainRef.current.get(chainId);
     if (cached) return cached;
@@ -63,10 +67,11 @@ export function SignHandler({
       provider,
       embedded.address as `0x${string}`,
       chainId,
+      privyToken,
     );
     sudoClientByChainRef.current.set(chainId, c);
     return c;
-  }, [embedded]);
+  }, [embedded, privyToken]);
 
   const [currentRequest, setCurrentRequest] = React.useState<SignRequest>(initialRequest);
   const [showManual, setShowManual] = React.useState(!initialRequest.autoSign);
@@ -82,13 +87,13 @@ export function SignHandler({
     if (cached) return cached;
     const blob = serializedBlobs?.[chainId] ?? serializedBlob;
     if (!blob) throw new Error(`no session-key blob for chain ${chainId}`);
-    const c = await createSessionKeyClient(blob, chainId);
+    const c = await createSessionKeyClient(blob, chainId, privyToken);
     if (c.chain?.id !== chainId) {
       throw new Error(`session client chain mismatch: built ${c.chain?.id}, requested ${chainId}`);
     }
     sessionClientByChainRef.current.set(chainId, c);
     return c;
-  }, [serializedBlob, serializedBlobs]);
+  }, [serializedBlob, serializedBlobs, privyToken]);
 
   // Resync only when the parent supplies a new request. Keying off a ref
   // (instead of putting `currentRequest.requestId` in the deps) prevents the
@@ -270,6 +275,10 @@ export function SignHandler({
               lastRpc ? (lastRpc.finishedAt ?? Date.now()) - lastRpc.startedAt : undefined,
             lastRpcInFlight: lastRpc ? lastRpc.finishedAt === undefined : undefined,
             lastRpcErrorBody: lastRpc?.errorBody,
+            lastRpcBodyBytes: lastRpc?.bodyBytes,
+            lastRpcThrowName: lastRpc?.throwName,
+            lastRpcThrowMessage: lastRpc?.throwMessage,
+            lastRpcThrowCause: lastRpc?.throwCause,
             kind: viemCtx.kind,
             endpoint: viemCtx.endpoint,
             status: viemCtx.status,

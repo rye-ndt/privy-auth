@@ -4,7 +4,6 @@ import type { Chain } from 'viem';
 interface ChainEntry {
   chain: Chain;
   defaultRpcUrl: string;
-  bundlerUrl: string;
   paymasterUrl?: string;
   sponsorshipPolicyId?: string;
 }
@@ -37,28 +36,24 @@ const CHAIN_REGISTRY: Record<number, ChainEntry> = {
   43114: {
     chain: avalanche,
     defaultRpcUrl: import.meta.env.VITE_CHAIN_RPC_URL as string,
-    bundlerUrl: import.meta.env.VITE_PIMLICO_BUNDLER_URL as string,
     paymasterUrl: import.meta.env.VITE_PIMLICO_PAYMASTER_URL as string | undefined,
     sponsorshipPolicyId: import.meta.env.VITE_PIMLICO_SPONSORSHIP_POLICY_ID as string | undefined,
   },
   43113: {
     chain: avalancheFuji,
     defaultRpcUrl: import.meta.env.VITE_CHAIN_RPC_URL as string,
-    bundlerUrl: import.meta.env.VITE_PIMLICO_BUNDLER_URL as string,
     paymasterUrl: import.meta.env.VITE_PIMLICO_PAYMASTER_URL as string | undefined,
     sponsorshipPolicyId: import.meta.env.VITE_PIMLICO_SPONSORSHIP_POLICY_ID as string | undefined,
   },
   56: {
     chain: bsc,
     defaultRpcUrl: import.meta.env.VITE_BSC_RPC_URL as string,
-    bundlerUrl: import.meta.env.VITE_BSC_PIMLICO_BUNDLER_URL as string,
     paymasterUrl: import.meta.env.VITE_BSC_PIMLICO_PAYMASTER_URL as string | undefined,
     sponsorshipPolicyId: import.meta.env.VITE_BSC_PIMLICO_SPONSORSHIP_POLICY_ID as string | undefined,
   },
   137: {
     chain: polygon,
     defaultRpcUrl: import.meta.env.VITE_POLYGON_RPC_URL as string,
-    bundlerUrl: import.meta.env.VITE_POLYGON_PIMLICO_BUNDLER_URL as string,
     paymasterUrl: import.meta.env.VITE_POLYGON_PIMLICO_PAYMASTER_URL as string | undefined,
     sponsorshipPolicyId: import.meta.env.VITE_POLYGON_PIMLICO_SPONSORSHIP_POLICY_ID as string | undefined,
   },
@@ -86,10 +81,20 @@ export function getRpcUrlById(chainId: number): string {
   if (!e?.defaultRpcUrl) throw new Error(`No RPC configured for chain ${chainId}`);
   return e.defaultRpcUrl;
 }
+function backendBase(): string {
+  const raw = import.meta.env.VITE_BACKEND_URL as string | undefined;
+  if (!raw) throw new Error('VITE_BACKEND_URL is required');
+  return raw.replace(/\/$/, '');
+}
+
+// Bundler RPCs are proxied through the BE (see
+// be/constructions/2026-05-15-bundler-proxy-be.md). We no longer hold a pimlico
+// API key on the FE. The "is this chain reachable" check is "is the chain in
+// the registry?" — if the BE has no PIMLICO_BUNDLER_URL_<chainId> set, it
+// returns 503 at request time, surfaced as a normal RPC error.
 export function getBundlerUrl(chainId: number): string {
-  const e = CHAIN_REGISTRY[chainId];
-  if (!e?.bundlerUrl) throw new Error(`No bundler configured for chain ${chainId}`);
-  return e.bundlerUrl;
+  if (!CHAIN_REGISTRY[chainId]) throw new Error(`Unsupported chain ID: ${chainId}`);
+  return `${backendBase()}/aa/bundler/${chainId}`;
 }
 export function getPaymasterUrl(chainId: number): string | undefined {
   return CHAIN_REGISTRY[chainId]?.paymasterUrl;
